@@ -99,8 +99,9 @@ rpa_activos_fijos/
 ├── salidas/                    # Excel ya en formato macro (runtime)
 ├── logs/                       # Un log por ejecución (con timestamp)
 └── docs/
-    ├── ESTADO_PROYECTO.md      # este archivo
-    └── CONFIGURACION_MANUAL.md # lo que hay que conseguir/configurar a mano
+    ├── ESTADO_PROYECTO.md         # este archivo
+    ├── CONFIGURACION_MANUAL.md    # lo que hay que conseguir/configurar a mano
+    └── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
 ```
 
 ### Cómo fluyen los datos (resumen)
@@ -195,6 +196,29 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-08-03 — Definiciones de la Bandeja de Actividades + nueva guía.**
+  - Confirmado con la usuaria: la bandeja **sí trae solicitudes mezcladas**
+    (no solo activos fijos), se filtra por la columna **"Nombre Del Flujo"**
+    (valor esperado: "Parametrización de Activos"). Esto reemplaza el plan
+    original de un filtro de UI (`BANDEJA_XPATH_FILTRO`) por un filtro **por
+    valor de celda**, más simple y robusto (pendiente de implementar en
+    `bandeja_reader.py` cuando lleguen los selectores reales).
+  - Se añade **priorización**: la bandeja tiene columna **"Fecha de
+    Vencimiento"**; los casos deben procesarse en orden de vencimiento (más
+    próximo primero). Pendiente de implementar el ordenamiento en
+    `listar_pendientes()`.
+  - Confirmado que el ID del caso (columna **"Numero De La Solicitud"**, ej.
+    `PDA-7133`) es clicable y coincide con el patrón ya soportado
+    (`BANDEJA_XPATH_ID_EN_FILA` + `BANDEJA_REGEX_CASE_ID`). No se necesita
+    interactuar con el botón "Acceso Actividad Actual"; basta con extraer el
+    ID como texto y usar `client.search_case(case_id)` como ya está.
+  - Nuevo documento [GUIA_EXTRACCION_ETIQUETAS.md](GUIA_EXTRACCION_ETIQUETAS.md):
+    guía paso a paso para que la usuaria/desarrollador capture los XPath de
+    la bandeja y las etiquetas del detalle del caso, con plantilla de entrega.
+  - **Nota:** todavía no se tocó código (`config.py` / `bandeja_reader.py`);
+    se está a la espera de que lleguen los selectores y etiquetas reales
+    siguiendo la nueva guía.
 
 - **2026-07-23 — v0.1.0 — Base inicial.**
   - Scaffold completo del proyecto con separación UI/lógica/Appian/transformación.
