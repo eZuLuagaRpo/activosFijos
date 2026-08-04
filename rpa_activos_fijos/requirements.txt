@@ -1,0 +1,15 @@
+# Dependencias del RPA "Parametrización de Activos Fijos"
+# Python 3.9+
+#
+# La librería an0016001_appian_flow ya viene instalada en el .venv corporativo
+# (trae selenium 4.36.0). Se lista aquí para dejar constancia de la versión.
+
+an0016001-appian-flow==1.0.4
+selenium==4.36.0
+pandas==2.3.3
+openpyxl==3.1.5
+customtkinter==5.2.2
+Pillow==11.3.0
+
+# Solo para empaquetar a .exe (no es necesaria en tiempo de ejecución):
+pyinstaller

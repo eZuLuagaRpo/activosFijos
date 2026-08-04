@@ -1,0 +1,22 @@
+# Ignorar artefactos de runtime y de empaquetado
+
+# Entorno virtual
+venv/
+.venv/
+
+# Cachés de Python
+__pycache__/
+*.pyc
+
+# Salidas de runtime del bot
+downloads/*
+!downloads/.gitkeep
+salidas/*
+!salidas/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Empaquetado PyInstaller
+build/
+dist/
+*.spec
