@@ -197,6 +197,53 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-04 — Selectores/labels reales cargados + rediseño de detección
+  de tipo/acción.**
+  - `config.py`: `BANDEJA_XPATH_FILAS`, `BANDEJA_XPATH_ID_EN_FILA`,
+    `BANDEJA_XPATH_NOMBRE_FLUJO` (nuevo) y `BANDEJA_XPATH_FECHA_VENCIMIENTO`
+    (nuevo) ya tienen los XPath reales capturados en Appian. Se eliminó
+    `BANDEJA_FILTRAR_POR_TIPO`/`BANDEJA_XPATH_FILTRO` (el filtro de UI que no
+    se iba a usar) y se reemplazó por filtro directo de celda
+    (`BANDEJA_NOMBRE_FLUJO_ESPERADO = "Parametrización de Activos"`).
+  - `appian/bandeja_reader.py`: `listar_pendientes()` ahora filtra por
+    "Nombre Del Flujo" y **ordena por "Fecha De Vencimiento"** (prioridad:
+    vence antes, primero). Devuelve `List[CasoBandeja]` en vez de solo IDs.
+  - **Rediseño de tipo/acción:** se descubrió que el detalle del caso NO
+    tiene un campo único "Tipo de Activo" + "Acción" (como asumía el diseño
+    original). Es una sección "Detalles" con 6 renglones fijos (Máscara,
+    Activos BRP, Activos PRJ, Activos Diferidos y Renovaciones, Mejoras,
+    Segunda Información); debajo de cada uno va la acción o un guion "-" si
+    no aplica. Se eliminaron `LABELS_TIPO_ACTIVO`/`LABELS_ACCION`/
+    `ALIAS_TIPO_ACTIVO`; se agregaron `DETALLE_XPATH_SECCION_ACTIVOS`,
+    `LABELS_ACTIVOS_DETALLE`, `DETALLE_VALOR_VACIO` y `TIPO_SEGUNDA_INFO`.
+  - `flujos/flujo1_appian.py`: nueva función
+    `_extraer_tipo_y_accion_detalle()` que lee la sección "Detalles" con
+    Selenium directo (`client.driver`) y toma el único renglón con acción
+    real. Se confirmó con la usuaria que **solo debería haber uno a la vez**;
+    si el bot encuentra más de uno, lanza `MultiplesActivosError` (nueva, en
+    `core/exceptions.py`) y el caso queda marcado como fallido para revisión
+    manual — **no se adivina**.
+  - Descarga del Excel: se mantiene `get_case_data(download_attachments=True)`
+    de la librería como método principal. Se agregó
+    `_descargar_adjunto_manual()` como **respaldo**: si no hay adjunto
+    usable, hace clic en `DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO` y espera a
+    que aparezca un archivo nuevo en `downloads/`. **Pendiente de probar en
+    Appian real** cuál de los dos caminos se usa efectivamente.
+  - `core/models.py`: nuevo `CasoBandeja` (case_id + fecha_vencimiento);
+    `Solicitud` ahora también guarda `fecha_vencimiento`.
+  - `orquestador.py`: `_procesar_un_caso` e `ejecutar()` ahora iteran sobre
+    `CasoBandeja` en vez de solo el `case_id`, para poder pasar la fecha de
+    vencimiento a lo largo del flujo.
+  - Logging: cada caso deja una línea de log consolidada con case_id, fecha
+    de vencimiento, activo y acción detectados (y la ruta del Excel).
+  - **Supuesto pendiente de validar mañana en Appian real:** que el `.text`
+    de Selenium sobre `DETALLE_XPATH_SECCION_ACTIVOS` efectivamente entrega
+    el nombre del activo y su acción en líneas consecutivas, en ese orden.
+    Si el parseo sale raro, revisar `_leer_lineas_seccion_activos()` en
+    `flujo1_appian.py` primero.
+  - Documentación: `CONFIGURACION_MANUAL.md` secciones 3 y 4 actualizadas
+    con nota de "ya capturado" apuntando a este changelog.
+
 - **2026-08-03 — Definiciones de la Bandeja de Actividades + nueva guía.**
   - Confirmado con la usuaria: la bandeja **sí trae solicitudes mezcladas**
     (no solo activos fijos), se filtra por la columna **"Nombre Del Flujo"**

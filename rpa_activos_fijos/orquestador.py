@@ -22,17 +22,21 @@ from core.models import ResultadoCaso, ResumenLote
 from flujos import flujo1_appian, flujo2_procesar, flujo3_sap
 
 
-def _procesar_un_caso(client, case_id, logger):
+def _procesar_un_caso(client, caso, logger):
     """
-    Ejecuta los flujos 1->2->3 para UN caso y devuelve su ResultadoCaso.
-    No lanza excepción: cualquier fallo se captura y se refleja en el resultado.
+    Ejecuta los flujos 1->2->3 para UN caso (un `CasoBandeja`) y devuelve su
+    ResultadoCaso. No lanza excepción: cualquier fallo se captura y se
+    refleja en el resultado.
     """
+    case_id = caso.case_id
     resultado = ResultadoCaso(case_id=case_id)
 
     try:
         # --- Flujo 1: obtener la solicitud (detalle + Excel) ---
         resultado.paso = "Flujo 1 (Appian)"
-        solicitud = flujo1_appian.obtener_solicitud(client, case_id, logger=logger)
+        solicitud = flujo1_appian.obtener_solicitud(
+            client, case_id, fecha_vencimiento=caso.fecha_vencimiento, logger=logger
+        )
 
         # --- Flujo 2: transformar al formato macro ---
         resultado.paso = "Flujo 2 (Transformación)"
@@ -91,13 +95,14 @@ def ejecutar(user, password, cola=None, logger=None):
         client.start(user, password)
         logger.info("Sesión de Appian iniciada correctamente.")
 
-        # 2) Leer la bandeja para saber qué casos hay pendientes.
-        case_ids = flujo1_appian.listar_casos_pendientes(client, logger=logger)
-        resumen.total = len(case_ids)
+        # 2) Leer la bandeja para saber qué casos hay pendientes (ya en orden
+        #    de prioridad por fecha de vencimiento).
+        casos = flujo1_appian.listar_casos_pendientes(client, logger=logger)
+        resumen.total = len(casos)
 
         # 3) Procesar caso por caso, aislando fallos.
-        for case_id in case_ids:
-            resultado = _procesar_un_caso(client, case_id, logger)
+        for caso in casos:
+            resultado = _procesar_un_caso(client, caso, logger)
             resumen.resultados.append(resultado)
             if resultado.exito:
                 resumen.exitosos += 1

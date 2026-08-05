@@ -2,13 +2,9 @@
 config.py — Configuración central del RPA "Parametrización de Activos Fijos".
 
 TODO lo que un día pueda cambiar (URLs, navegador, tiempos de espera, rutas,
-número de reintentos, labels de los campos de Appian, etc.) vive AQUÍ y NO
+número de reintentos, selectores/labels de Appian, etc.) vive AQUÍ y NO
 incrustado dentro del código de los flujos. Así, cuando algo cambie en Appian
 o en el PC de la usuaria, solo se toca este archivo.
-
-Si eres principiante: piensa en este archivo como el "panel de control" del bot.
-Casi todos los valores marcados con  # TODO  deben confirmarse con la usuaria
-real o capturándolos en el navegador (ver docs/CONFIGURACION_MANUAL.md).
 """
 
 import os
@@ -16,26 +12,14 @@ import os
 # ---------------------------------------------------------------------------
 # RUTAS DEL PROYECTO
 # ---------------------------------------------------------------------------
-# BASE_DIR es la carpeta donde vive este archivo (la raíz del proyecto).
-# Se calcula sola; no la cambies.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Carpeta donde la librería de Appian dejará los Excel que descargue.
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
-
-# Carpeta donde el Flujo 2 guardará los Excel ya transformados al formato macro.
 OUTPUT_DIR = os.path.join(BASE_DIR, "salidas")
-
-# Carpeta donde se guardan los archivos de log (uno por ejecución, con fecha).
 LOG_DIR = os.path.join(BASE_DIR, "logs")
-
-# Carpeta de assets (imágenes/íconos de la UI).
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-
-# Carpeta con las plantillas de macro de SAP y la configuración de mapeo.
 MAPPING_DIR = os.path.join(BASE_DIR, "transformacion", "mapping")
 
-# Nos aseguramos de que las carpetas de salida existan al arrancar.
 for _carpeta in (DOWNLOAD_DIR, OUTPUT_DIR, LOG_DIR):
     os.makedirs(_carpeta, exist_ok=True)
 
@@ -44,113 +28,70 @@ for _carpeta in (DOWNLOAD_DIR, OUTPUT_DIR, LOG_DIR):
 # APPIAN — CONEXIÓN Y NAVEGADOR
 # ---------------------------------------------------------------------------
 # TODO: CONFIRMAR con la usuaria la URL EXACTA de Appian que ella usa.
-# Debe ser la dirección completa, por ejemplo:
-#   "https://bancolombia.appiancloud.com/suite/"
 APPIAN_URL = "https://CAMBIAR-POR-URL-REAL-DE-APPIAN"
 
-# Navegador con el que trabaja la librería. Por defecto Edge (confirmar que la
-# usuaria use Edge y que pueda descargar archivos).
 BROWSER = "edge"
-
-# Tiempo (segundos) máximo que la librería espera a que un elemento aparezca.
 TIMEOUT = 90
-
-# Tiempo (segundos) máximo que la librería espera a que termine una descarga.
 TIMEOUT_FILES = 600
 
 
 # ---------------------------------------------------------------------------
 # REINTENTOS (resiliencia ante lentitud de red / render)
 # ---------------------------------------------------------------------------
-# Número de intentos para operaciones web que pueden fallar por lentitud.
 RETRY_INTENTOS = 3
-
-# Espera inicial (segundos) entre reintentos. Crece con "backoff" (ver core/retry.py).
 RETRY_ESPERA_INICIAL = 2.0
-
-# Factor de crecimiento de la espera: 2.0 => 2s, 4s, 8s...
 RETRY_FACTOR_BACKOFF = 2.0
 
 
 # ---------------------------------------------------------------------------
-# BANDEJA DE ACTIVIDADES — SELECTORES (PLACEHOLDERS)
+# BANDEJA DE ACTIVIDADES — SELECTORES (capturados en Appian real, 2026-08-04)
 # ---------------------------------------------------------------------------
 # La librería NO sabe leer la Bandeja de Actividades: eso lo construimos
-# nosotros en appian/bandeja_reader.py. Necesitamos los XPath reales de la
-# tabla de la bandeja. Como todavía no los conocemos, quedan como PLACEHOLDER.
-#
-# CÓMO CAPTURARLOS: abre Appian en Edge, entra a la Bandeja de Actividades,
-# presiona F12 (DevTools), usa la flechita de "inspeccionar" y haz clic sobre
-# la fila / el enlace del ID. Copia el XPath y pégalo aquí.
-# Paso a paso detallado en docs/CONFIGURACION_MANUAL.md.
+# nosotros en appian/bandeja_reader.py.
 #
 # Se ofrecen listas de selectores: el bandeja_reader prueba el primero y, si
-# no encuentra nada, pasa al siguiente (selectores de respaldo).
+# no encuentra nada, pasa al siguiente (selectores de respaldo). Por ahora
+# solo hay uno por columna (el capturado); si algún día falla, se le agregan
+# alternativas aquí sin tocar el código.
 
-# TODO: CAPTURAR SELECTOR REAL — filas de la tabla de la bandeja.
+# Filas de la tabla de la bandeja.
 BANDEJA_XPATH_FILAS = [
-    "//table//tbody/tr",                     # principal (placeholder)
-    "//div[@role='row']",                    # respaldo 1 (placeholder)
-    "//*[contains(@class,'grid')]//tr",      # respaldo 2 (placeholder)
+    '//*[@id="sitesBody"]/div/div/div[6]/div[2]/div/div[1]/table/tbody/tr',
 ]
 
-# TODO: CAPTURAR SELECTOR REAL — celda/enlace que contiene el ID del caso
-# DENTRO de cada fila (XPath RELATIVO a la fila, por eso empieza con ".//").
+# Celda/enlace con el ID de la solicitud (columna "Número De La Solicitud"),
+# XPath RELATIVO a la fila.
 BANDEJA_XPATH_ID_EN_FILA = [
-    ".//a",                                  # principal (placeholder)
-    ".//td[1]//a",                           # respaldo 1 (placeholder)
-    ".//td[1]",                              # respaldo 2 (placeholder)
+    './/td[4]/div/p/strong/a',
 ]
 
-# TODO (OPCIONAL): CAPTURAR SELECTOR REAL — control para filtrar la bandeja por
-# tipo de proceso (si algún día llegan casos mezclados). De momento no se usa.
-BANDEJA_XPATH_FILTRO = [
-    # "//input[@aria-label='Filtrar']",      # placeholder
+# Celda con el nombre del flujo (columna "Nombre Del Flujo"), relativo a la
+# fila. La bandeja llega con OTROS procesos mezclados (confirmado), por eso
+# se filtra por esta columna.
+BANDEJA_XPATH_NOMBRE_FLUJO = [
+    './/td[6]/p',
 ]
+BANDEJA_NOMBRE_FLUJO_ESPERADO = "Parametrización de Activos"
 
-# Expresión regular con la que reconocemos un ID de caso válido dentro del texto
-# de la celda. Por defecto reconoce cosas como "PDA-2389".
-# TODO: CONFIRMAR el prefijo/patrón real de los casos de activos fijos.
+# Celda con la fecha de vencimiento (columna "Fecha De Vencimiento
+# (Solicitud)"), relativo a la fila. Se usa para procesar por PRIORIDAD (la
+# que vence antes, primero).
+BANDEJA_XPATH_FECHA_VENCIMIENTO = [
+    './/td[13]/div/p/span',
+]
+# Formato en el que Appian muestra la fecha, ej. "06/10/2026 12:00".
+BANDEJA_FORMATO_FECHA = "%d/%m/%Y %H:%M"
+
+# Expresión regular con la que reconocemos un ID de caso válido dentro del
+# texto de la celda (ej. "PDA-2389").
 BANDEJA_REGEX_CASE_ID = r"[A-Z]{2,5}-\d{2,}"
-
-# SUPUESTO ACTUAL (PENDIENTE de confirmar): a la usuaria de la bandeja le llegan
-# SOLO solicitudes de activos fijos. Si un día llegan mezcladas, poner esto en
-# True y completar BANDEJA_XPATH_FILTRO / la lógica de filtrado.
-BANDEJA_FILTRAR_POR_TIPO = False
-
-
-# ---------------------------------------------------------------------------
-# DETALLE DEL CASO — LABELS DE LOS CAMPOS QUE NECESITAMOS
-# ---------------------------------------------------------------------------
-# get_case_data() devuelve un DataFrame con columnas  label | value.
-# De ahí sacamos el "tipo de activo" y la "acción". Necesitamos saber el TEXTO
-# EXACTO del label tal como aparece en Appian (respetando mayúsculas/tildes).
-#
-# Se aceptan varios posibles labels por si el nombre cambia entre formularios;
-# el flujo1 prueba en orden hasta encontrar uno.
-#
-# TODO: CONFIRMAR los labels exactos abriendo un caso real y mirando el detalle.
-LABELS_TIPO_ACTIVO = [
-    "Tipo de Activo",        # placeholder
-    "Tipo Activo",           # placeholder
-    "Tipo de activo",        # placeholder
-]
-
-LABELS_ACCION = [
-    "Acción",                # placeholder
-    "Accion",                # placeholder
-    "Tipo de Acción",        # placeholder
-]
 
 
 # ---------------------------------------------------------------------------
 # DOMINIO DE NEGOCIO — TIPOS DE ACTIVO Y ACCIONES
 # ---------------------------------------------------------------------------
-# Nombres "canónicos" (internos) que usa el bot. El texto que venga de Appian se
-# normaliza (minúsculas, sin tildes) y se compara contra los alias de abajo.
-
 # Acciones y su código de macro asociado.
-ACCION_CREACION = "creacion"        # AS01
+ACCION_CREACION = "creacion"          # AS01
 ACCION_MODIFICACION = "modificacion"  # AS02
 ACCION_ELIMINACION = "eliminacion"
 
@@ -160,32 +101,15 @@ CODIGO_MACRO_POR_ACCION = {
     ACCION_ELIMINACION: "ELIM",   # TODO: CONFIRMAR el código real de eliminación
 }
 
-# Tipos de activo canónicos.
+# Tipos de activo canónicos (los 6 renglones fijos de la sección "Detalles").
 TIPO_MASCARAS = "mascaras"
 TIPO_BRP = "brp"
 TIPO_PRJ = "prj"
 TIPO_DIFERIDOS = "diferidos"
 TIPO_MEJORAS = "mejoras"
+TIPO_SEGUNDA_INFO = "segunda_informacion"
 
-# Alias: cómo puede venir escrito cada valor desde Appian -> valor canónico.
-# TODO: CONFIRMAR/AMPLIAR con los textos reales que aparecen en Appian.
-ALIAS_TIPO_ACTIVO = {
-    "mascaras": TIPO_MASCARAS,
-    "mascara": TIPO_MASCARAS,
-    "activo principal": TIPO_MASCARAS,
-    "brp": TIPO_BRP,
-    "bienes recibidos en pago": TIPO_BRP,
-    "prj": TIPO_PRJ,
-    "proyecto": TIPO_PRJ,
-    "activo de proyecto": TIPO_PRJ,
-    "diferidos": TIPO_DIFERIDOS,
-    "diferido": TIPO_DIFERIDOS,
-    "diferidos y renovaciones": TIPO_DIFERIDOS,
-    "licencias": TIPO_DIFERIDOS,
-    "mejoras": TIPO_MEJORAS,
-    "mejora": TIPO_MEJORAS,
-}
-
+# Cómo puede venir escrito el VALOR de la acción desde Appian -> valor canónico.
 ALIAS_ACCION = {
     "creacion": ACCION_CREACION,
     "crear": ACCION_CREACION,
@@ -197,6 +121,43 @@ ALIAS_ACCION = {
     "eliminar": ACCION_ELIMINACION,
     "baja": ACCION_ELIMINACION,
 }
+
+
+# ---------------------------------------------------------------------------
+# DETALLE DEL CASO — SECCIÓN "Detalles" (tipo de activo + acción)
+# ---------------------------------------------------------------------------
+# Dentro del caso hay una sección "Detalles" con un renglón FIJO por cada tipo
+# de activo posible. Debajo de cada nombre aparece la acción a realizar
+# (Crear/Modificar/Eliminar) o un guion "-" si ese tipo NO aplica a esta
+# solicitud. Se confirmó con la usuaria que SOLO UNO de los renglones trae una
+# acción real; si el bot encuentra más de uno, no adivina: marca el caso como
+# fallido para revisión manual (ver flujos/flujo1_appian.py).
+
+# XPath del contenedor de esa sección completa (capturado en Appian real).
+DETALLE_XPATH_SECCION_ACTIVOS = (
+    '//*[@id="f868ae114fc7b69e3840a9e5db2ddaee_sectionContents"]/div/div/div/div'
+)
+
+# Texto que indica "este tipo no aplica" en el renglón.
+DETALLE_VALOR_VACIO = "-"
+
+# Texto EXACTO de cada renglón tal como aparece en Appian -> tipo canónico.
+LABELS_ACTIVOS_DETALLE = {
+    "Máscara": TIPO_MASCARAS,
+    "Activos BRP": TIPO_BRP,
+    "Activos PRJ": TIPO_PRJ,
+    "Activos Diferidos y Renovaciones": TIPO_DIFERIDOS,
+    "Mejoras": TIPO_MEJORAS,
+    "Segunda Información": TIPO_SEGUNDA_INFO,
+}
+
+# Botón de descarga de adjuntos, SOLO como respaldo manual por si
+# get_case_data(download_attachments=True) de la librería no descarga el
+# Excel solo (todavía sin confirmar).
+DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO = (
+    '//*[@id="459088681f2b464483d3c469e4838095_sectionContents"]'
+    '/div/div/div/div/div[3]/div[2]/div/div/div/div/button/span/span[2]'
+)
 
 
 # ---------------------------------------------------------------------------

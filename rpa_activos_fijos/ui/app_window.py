@@ -52,17 +52,52 @@ class AppWindow(ctk.CTk):
                 pass  # el ícono no es crítico
 
     def _configurar_fondo(self):
-        fondo = os.path.join(ASSETS_DIR, "fondo.png")
-        if os.path.exists(fondo):
-            try:
-                imagen = Image.open(fondo)
-                self.bg_image = ctk.CTkImage(
-                    light_image=imagen, dark_image=imagen, size=(900, 680)
-                )
-                self.bg_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-                self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-            except Exception:
-                pass  # el fondo tampoco es crítico
+        """
+        Fondo claro (no el splash negro original, que no combinaba con las
+        tarjetas blancas del centro) con acentos decorativos de marca —los
+        trazos de onda de colores Bancolombia— apenas insinuados en las
+        esquinas, MUY sutiles para no competir con el contenido.
+        """
+        # Base clara detrás de todo.
+        self.bg_label = ctk.CTkLabel(self, text="", fg_color=self.colors["background"])
+        self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+        self._onda_images = []  # referencias vivas (si no, el GC las borra)
+        self._agregar_onda(
+            "trazo-onda-11.png", ancho=620, x=-90, y=-70, opacidad=0.16
+        )
+        self._agregar_onda(
+            "trazo-onda-12.png",
+            ancho=620,
+            x=900 - 620 + 90,
+            y=680 - 260,
+            opacidad=0.16,
+            rotar_180=True,
+        )
+
+    def _agregar_onda(self, archivo, ancho, x, y, opacidad=0.16, rotar_180=False):
+        """Coloca una imagen decorativa (trazo de onda) semi-transparente."""
+        ruta = os.path.join(ASSETS_DIR, archivo)
+        if not os.path.exists(ruta):
+            return
+        try:
+            imagen = Image.open(ruta).convert("RGBA")
+            if rotar_180:
+                imagen = imagen.transpose(Image.ROTATE_180)
+            alto = int(ancho * imagen.height / imagen.width)
+            imagen = imagen.resize((ancho, alto), Image.LANCZOS)
+            # Bajamos la opacidad multiplicando el canal alfa (aquí no hay
+            # transparencia real de widget, solo de la imagen en sí).
+            alpha = imagen.getchannel("A").point(lambda a, o=opacidad: int(a * o))
+            imagen.putalpha(alpha)
+
+            ctk_img = ctk.CTkImage(light_image=imagen, dark_image=imagen, size=(ancho, alto))
+            self._onda_images.append(ctk_img)  # evita que el GC la recoja
+
+            label = ctk.CTkLabel(self, image=ctk_img, text="")
+            label.place(x=x, y=y)
+        except Exception:
+            pass  # es decorativo, nunca debe tumbar el arranque
 
     # -- Credenciales (en memoria) -------------------------------------------
     def set_credenciales(self, user, password):

@@ -43,3 +43,9 @@ class TransformacionError(RPAError):
 
 class ConfiguracionError(RPAError):
     """Falta un dato de configuración o una plantilla obligatoria."""
+
+
+class MultiplesActivosError(RPAError):
+    """Más de un renglón de la sección 'Detalles' trae una acción a la vez
+    (se esperaba que solo uno aplicara). No es un error de comunicación con
+    Appian, así que NO se reintenta."""

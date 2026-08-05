@@ -33,7 +33,7 @@ def apply_theme():
         "card": "#FFFFFF",
 
         # Apoyos UI
-        "background": "#F7F7F7",
+        "background": "#F7F7F5",
         "border": "#E4E1DD",
         "muted": "#706C68",
         "input": "#FFFFFF",
@@ -43,6 +43,11 @@ def apply_theme():
         "disabled": "#B8B4AF",
         "danger": "#D93025",
         "success": "#00875A",
+
+        # Sombra de tarjeta (rectángulo sólido, offset, detrás de la tarjeta
+        # blanca; tkinter no soporta alpha real, así que se simula con un
+        # tono cálido apenas más oscuro que el fondo).
+        "card_shadow": "#E3DFD8",
 
         # Colores para la consola de logs (fondo oscuro para leer cómodo)
         "console_bg": "#1F1D1C",

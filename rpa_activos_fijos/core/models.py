@@ -11,6 +11,17 @@ from typing import Any, List, Optional
 
 
 @dataclass
+class CasoBandeja:
+    """
+    Una fila de la Bandeja de Actividades ya filtrada (solo Parametrización de
+    Activos). Es lo que produce `BandejaReader.listar_pendientes()`.
+    """
+
+    case_id: str                              # ej. "PDA-7133"
+    fecha_vencimiento: Optional[str] = None   # texto crudo, ej. "06/10/2026 12:00"
+
+
+@dataclass
 class Solicitud:
     """
     Representa UNA solicitud de activo fijo detectada en la bandeja y ya
@@ -22,6 +33,7 @@ class Solicitud:
     accion: Optional[str] = None      # acción canónica (creacion/modificacion/...)
     excel_path: Optional[str] = None  # ruta completa del Excel descargado de Appian
     info_df: Any = None               # DataFrame label|value con todo el detalle
+    fecha_vencimiento: Optional[str] = None  # heredada de la bandeja (prioridad)
 
     # Textos crudos tal como venían en Appian (útil para diagnóstico/logs).
     tipo_crudo: Optional[str] = None

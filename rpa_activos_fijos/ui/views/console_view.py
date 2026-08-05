@@ -1,9 +1,12 @@
 """
 ui/views/console_view.py — Vista de consola de logs en vivo.
 
-Muestra en tiempo real lo que hace el bot. Puntos clave de concurrencia:
-  - Al presionar "Ejecutar", el bot corre en un HILO APARTE (threading.Thread)
-    para que la ventana NUNCA se congele.
+Muestra en tiempo real lo que hace el bot. La ejecución arranca SOLA en cuanto
+se muestra esta vista (la dispara `login_view` al presionar "Iniciar"; menos
+clics para la usuaria) mediante `iniciar_ejecucion()`. Puntos clave de
+concurrencia:
+  - El bot corre en un HILO APARTE (threading.Thread) para que la ventana
+    NUNCA se congele.
   - El bot y la UI se comunican con una COLA thread-safe (queue.Queue): el bot
     "deposita" mensajes de log en la cola; la UI los recoge periódicamente con
     `after()` (bucle no bloqueante).
@@ -22,7 +25,7 @@ class ConsoleView(ctk.CTkFrame):
     """Consola de ejecución + estado + botones Ejecutar/Volver."""
 
     def __init__(self, master, colors, app):
-        super().__init__(master, fg_color="transparent", width=760, height=560)
+        super().__init__(master, fg_color="transparent", width=780, height=580)
         self.colors = colors
         self.app = app
 
@@ -33,6 +36,15 @@ class ConsoleView(ctk.CTkFrame):
 
         self.pack_propagate(False)
         self.grid_propagate(False)
+
+        # Misma "sombra" offset que la tarjeta de login, para consistencia visual.
+        ctk.CTkFrame(
+            self,
+            width=760,
+            height=560,
+            fg_color=colors["card_shadow"],
+            corner_radius=26,
+        ).place(relx=0.5, rely=0.5, anchor="center", x=6, y=8)
 
         card = ctk.CTkFrame(
             self,
@@ -99,20 +111,6 @@ class ConsoleView(ctk.CTkFrame):
         )
         self.volver_btn.pack(side="left")
 
-        self.ejecutar_btn = ctk.CTkButton(
-            botones,
-            text="Ejecutar",
-            width=180,
-            height=40,
-            corner_radius=14,
-            fg_color=colors["primary"],
-            text_color=colors["dark"],
-            hover_color=colors["hover_yellow"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self._on_ejecutar,
-        )
-        self.ejecutar_btn.pack(side="right")
-
         # Empezamos a vaciar la cola periódicamente.
         self._consumir_cola()
 
@@ -139,8 +137,12 @@ class ConsoleView(ctk.CTkFrame):
         # Volver a revisar en 100 ms (esto mantiene la UI fluida).
         self.after(100, self._consumir_cola)
 
-    # -- Acciones de botones ---------------------------------------------------
-    def _on_ejecutar(self):
+    # -- Arranque de la ejecución -----------------------------------------------
+    def iniciar_ejecucion(self):
+        """
+        Arranca el bot. La llama `login_view` apenas navega a esta vista (así
+        la usuaria no necesita un clic aparte de "Ejecutar").
+        """
         if self.ejecutando:
             return
 
@@ -151,7 +153,6 @@ class ConsoleView(ctk.CTkFrame):
             return
 
         self.ejecutando = True
-        self.ejecutar_btn.configure(state="disabled")
         self.volver_btn.configure(state="disabled")
         self._set_estado("Ejecutando", self.colors["blue"])
 
@@ -177,7 +178,6 @@ class ConsoleView(ctk.CTkFrame):
 
     def _finalizar(self, estado, color):
         self.ejecutando = False
-        self.ejecutar_btn.configure(state="normal")
         self.volver_btn.configure(state="normal")
         self._set_estado(estado, color)
 

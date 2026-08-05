@@ -1,41 +1,45 @@
 """
-appian/bandeja_reader.py — Lector de la Bandeja de Actividades (MÓDULO NUEVO).
+appian/bandeja_reader.py — Lector de la Bandeja de Actividades.
 
-La librería `an0016001_appian_flow` trabaja a partir de un `case_id` YA conocido
-(sabe abrir un caso, leer sus datos y descargar adjuntos). Pero NO sabe recorrer
-la Bandeja de Actividades para AVERIGUAR qué casos hay pendientes. Eso lo hacemos
-aquí, usando directamente el WebDriver de Selenium que la librería expone.
+La librería `an0016001_appian_flow` trabaja a partir de un `case_id` YA
+conocido (sabe abrir un caso, leer sus datos y descargar adjuntos). Pero NO
+sabe recorrer la Bandeja de Actividades para AVERIGUAR qué casos hay
+pendientes. Eso lo hacemos aquí, usando directamente el WebDriver de Selenium
+que la librería expone.
 
-⚠️ SELECTORES PLACEHOLDER ⚠️
-Todavía no conocemos los XPath reales de la tabla de la bandeja. Están en
-config.py (BANDEJA_XPATH_*) marcados con  # TODO: CAPTURAR SELECTOR REAL.
-Este módulo prueba varios selectores "de respaldo" en orden: si el principal no
-encuentra nada, pasa al siguiente antes de rendirse.
-
-Cómo capturar los selectores reales: ver docs/CONFIGURACION_MANUAL.md.
+La bandeja llega con solicitudes de VARIOS procesos mezclados (confirmado con
+la usuaria), por eso se filtra por la columna "Nombre Del Flujo". Además se
+procesa por PRIORIDAD: se ordena por "Fecha De Vencimiento" (la que vence
+antes, primero).
 """
 
 import re
+from datetime import datetime
 
 from selenium.webdriver.common.by import By
 
 from config import (
-    BANDEJA_FILTRAR_POR_TIPO,
+    BANDEJA_FORMATO_FECHA,
+    BANDEJA_NOMBRE_FLUJO_ESPERADO,
     BANDEJA_REGEX_CASE_ID,
+    BANDEJA_XPATH_FECHA_VENCIMIENTO,
     BANDEJA_XPATH_FILAS,
     BANDEJA_XPATH_ID_EN_FILA,
+    BANDEJA_XPATH_NOMBRE_FLUJO,
 )
 from core.exceptions import BandejaError
+from core.models import CasoBandeja
+from core.texto import normalizar
 
 
 class BandejaReader:
     """
-    Recorre la Bandeja de Actividades y devuelve la lista de IDs de casos
-    pendientes.
+    Recorre la Bandeja de Actividades y devuelve la lista de solicitudes de
+    Parametrización de Activos pendientes, ya ordenadas por prioridad.
     """
 
     def __init__(self, appian_client, logger=None):
-        # Reutilizamos el driver/wait de la librería a través del wrapper.
+        # Reutilizamos el driver de la librería a través del wrapper.
         self.client = appian_client
         self.driver = appian_client.driver
         self.logger = logger
@@ -43,11 +47,6 @@ class BandejaReader:
 
     # -- Utilidad: probar una lista de selectores hasta que uno funcione -------
     def _buscar_con_respaldo(self, contexto, lista_xpath, descripcion):
-        """
-        Prueba cada XPath de `lista_xpath` sobre `contexto` (el driver o una
-        fila). Devuelve la lista de elementos del primer selector que encuentre
-        algo. Si ninguno funciona, devuelve lista vacía.
-        """
         for indice, xpath in enumerate(lista_xpath):
             try:
                 elementos = contexto.find_elements(By.XPATH, xpath)
@@ -67,83 +66,106 @@ class BandejaReader:
                     )
         return []
 
-    def _extraer_case_id(self, fila):
-        """
-        Dada una fila de la tabla, intenta sacar el ID del caso (ej. PDA-2389).
-        Prueba los selectores de ID y, dentro del texto encontrado, aplica la
-        expresión regular de config.py para quedarse solo con el ID.
-        """
-        celdas = self._buscar_con_respaldo(
-            fila, BANDEJA_XPATH_ID_EN_FILA, "ID del caso en la fila"
-        )
-        for celda in celdas:
-            texto = (celda.text or "").strip()
-            coincidencia = self._regex_id.search(texto)
-            if coincidencia:
-                return coincidencia.group(0)
+    def _texto_de(self, fila, lista_xpath, descripcion):
+        """Texto (strip) del primer elemento no vacío que encuentre, o None."""
+        for elemento in self._buscar_con_respaldo(fila, lista_xpath, descripcion):
+            texto = (elemento.text or "").strip()
+            if texto:
+                return texto
         return None
+
+    def _extraer_case_id(self, texto):
+        if not texto:
+            return None
+        coincidencia = self._regex_id.search(texto)
+        return coincidencia.group(0) if coincidencia else None
+
+    def _parsear_fecha(self, texto):
+        """Convierte el texto de la fecha a datetime, o None si no se puede."""
+        if not texto:
+            return None
+        try:
+            return datetime.strptime(texto, BANDEJA_FORMATO_FECHA)
+        except ValueError:
+            if self.logger:
+                self.logger.warning(
+                    "No se pudo interpretar la fecha de vencimiento '%s' "
+                    "(se esperaba el formato '%s'). Ese caso quedará al final "
+                    "del orden de prioridad.",
+                    texto,
+                    BANDEJA_FORMATO_FECHA,
+                )
+            return None
 
     def listar_pendientes(self):
         """
-        Devuelve la lista de `case_id` pendientes en la bandeja (sin duplicados,
-        conservando el orden en que aparecen).
+        Devuelve la lista de `CasoBandeja` (case_id + fecha_vencimiento) de
+        Parametrización de Activos pendientes, ordenada por fecha de
+        vencimiento ascendente (más urgente primero).
 
         Raises:
-            BandejaError: si no se encuentra la tabla o no hay ningún ID legible.
+            BandejaError: si no se encuentra la tabla o ninguna solicitud
+                legible de Parametrización de Activos.
         """
         if self.logger:
             self.logger.info("Leyendo la Bandeja de Actividades...")
 
-        # La librería ya deja abierta la URL base tras el login. Si en el futuro
-        # la bandeja está en otra URL, se navega aquí (self.driver.get(...)).
-
-        # PENDIENTE (ver CONFIGURACION_MANUAL.md): se asume que a la usuaria le
-        # llegan SOLO solicitudes de activos fijos. Si algún día llegan mezcladas,
-        # activar BANDEJA_FILTRAR_POR_TIPO y aplicar el filtro aquí.
-        if BANDEJA_FILTRAR_POR_TIPO:
-            self._aplicar_filtro_tipo()
-
         filas = self._buscar_con_respaldo(
             self.driver, BANDEJA_XPATH_FILAS, "filas de la bandeja"
         )
-
         if not filas:
             raise BandejaError(
                 "No se encontraron filas en la Bandeja de Actividades. "
-                "Revisa los selectores BANDEJA_XPATH_FILAS en config.py "
-                "(ver docs/CONFIGURACION_MANUAL.md)."
+                "Revisa BANDEJA_XPATH_FILAS en config.py."
             )
 
+        nombre_esperado_norm = normalizar(BANDEJA_NOMBRE_FLUJO_ESPERADO)
+        vistos = set()
         pendientes = []
+
         for fila in filas:
-            case_id = self._extraer_case_id(fila)
-            if case_id and case_id not in pendientes:
-                pendientes.append(case_id)
+            texto_id = self._texto_de(
+                fila, BANDEJA_XPATH_ID_EN_FILA, "ID del caso en la fila"
+            )
+            case_id = self._extraer_case_id(texto_id)
+            if not case_id or case_id in vistos:
+                continue
+
+            nombre_flujo = self._texto_de(
+                fila, BANDEJA_XPATH_NOMBRE_FLUJO, "nombre del flujo en la fila"
+            )
+            if normalizar(nombre_flujo) != nombre_esperado_norm:
+                continue  # Es de otro proceso, no de Parametrización de Activos.
+
+            fecha_texto = self._texto_de(
+                fila, BANDEJA_XPATH_FECHA_VENCIMIENTO, "fecha de vencimiento en la fila"
+            )
+
+            vistos.add(case_id)
+            pendientes.append(CasoBandeja(case_id=case_id, fecha_vencimiento=fecha_texto))
 
         if not pendientes:
             raise BandejaError(
-                "Se encontraron filas pero ningún ID de caso legible. "
-                "Revisa BANDEJA_XPATH_ID_EN_FILA y BANDEJA_REGEX_CASE_ID en config.py."
+                "Se encontraron filas pero ninguna solicitud de "
+                f"'{BANDEJA_NOMBRE_FLUJO_ESPERADO}' con un ID legible. "
+                "Revisa los selectores BANDEJA_XPATH_* en config.py."
             )
+
+        # Prioridad: vence antes, primero. Fechas no interpretables van al final.
+        pendientes.sort(
+            key=lambda c: self._parsear_fecha(c.fecha_vencimiento) or datetime.max
+        )
 
         if self.logger:
             self.logger.info(
-                "Bandeja leída: %s solicitud(es) pendiente(s): %s",
+                "Bandeja leída: %s solicitud(es) de '%s' pendiente(s), en "
+                "orden de prioridad:",
                 len(pendientes),
-                ", ".join(pendientes),
+                BANDEJA_NOMBRE_FLUJO_ESPERADO,
             )
+            for caso in pendientes:
+                self.logger.info(
+                    "  - %s | vence: %s", caso.case_id, caso.fecha_vencimiento
+                )
+
         return pendientes
-
-    def _aplicar_filtro_tipo(self):
-        """
-        Punto preparado para filtrar la bandeja por tipo de proceso (activos
-        fijos) cuando se confirme que llegan casos mezclados.
-
-        # TODO: CAPTURAR SELECTOR REAL del filtro (BANDEJA_XPATH_FILTRO) e
-        # implementar el clic/escritura necesarios. De momento no hace nada.
-        """
-        if self.logger:
-            self.logger.warning(
-                "Filtrado por tipo activado pero NO implementado todavía "
-                "(pendiente de confirmar y capturar el selector del filtro)."
-            )

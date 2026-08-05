@@ -81,9 +81,19 @@ captura:
 
 ## 3. Selectores de la Bandeja de Actividades
 
+> ✅ **YA CAPTURADO (2026-08-04).** Los XPath reales de filas, ID, "Nombre Del
+> Flujo" y "Fecha De Vencimiento" ya están en `config.py`
+> (`BANDEJA_XPATH_*`). Además se confirmó que la bandeja llega con **otros
+> procesos mezclados**, por lo que ahora se filtra por la columna "Nombre Del
+> Flujo" (`BANDEJA_NOMBRE_FLUJO_ESPERADO = "Parametrización de Activos"`) y
+> se ordena por "Fecha De Vencimiento" (prioridad). Ver el detalle completo
+> en [GUIA_EXTRACCION_ETIQUETAS.md](GUIA_EXTRACCION_ETIQUETAS.md) y el
+> changelog de [ESTADO_PROYECTO.md](ESTADO_PROYECTO.md). El resto de esta
+> sección queda como referencia de cómo se capturó, por si hay que volver a
+> hacerlo en el futuro.
+
 La librería **no** sabe leer la bandeja; eso lo hace nuestro
-`appian/bandeja_reader.py`, que usa los XPath definidos en `config.py`. Ahora
-mismo son **placeholders** (marcados con `# TODO: CAPTURAR SELECTOR REAL`).
+`appian/bandeja_reader.py`, que usa los XPath definidos en `config.py`.
 
 Necesitas capturar **tres cosas** (una es opcional):
 
@@ -133,6 +143,20 @@ De momento se deja vacío y **no se usa**.
 ---
 
 ## 4. Labels del detalle del caso
+
+> ✅ **YA CAPTURADO (2026-08-04) — con un mecanismo distinto al descrito
+> abajo.** Se descubrió que NO hay un campo único "Tipo de Activo" + un
+> campo único "Acción": hay una sección **"Detalles"** con un renglón FIJO
+> por cada uno de 6 tipos de activo posibles (Máscara, Activos BRP, Activos
+> PRJ, Activos Diferidos y Renovaciones, Mejoras, Segunda Información), y
+> debajo de cada nombre aparece su acción (Crear/Modificar/Eliminar) o un
+> guion `"-"` si no aplica. El bot lee esos 6 renglones
+> (`DETALLE_XPATH_SECCION_ACTIVOS` + `LABELS_ACTIVOS_DETALLE` en
+> `config.py`) y usa el único que NO esté en `"-"`. Si más de uno trae
+> acción a la vez, el caso se marca como fallido (no se adivina). El resto
+> de esta sección queda como referencia del diseño original (ya no aplica
+> tal cual). Ver el changelog en
+> [ESTADO_PROYECTO.md](ESTADO_PROYECTO.md).
 
 Cuando el bot abre un caso, la librería devuelve una tabla con dos columnas:
 `label` (nombre del campo) y `value` (su valor). De ahí sacamos el **tipo de
