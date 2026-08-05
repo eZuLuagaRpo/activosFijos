@@ -15,6 +15,9 @@ from ui.styles.theme import apply_theme
 from ui.views.console_view import ConsoleView
 from ui.views.login_view import LoginView
 
+ANCHO_VENTANA = 900
+ALTO_VENTANA = 680
+
 
 class AppWindow(ctk.CTk):
     """Ventana raíz de la aplicación."""
@@ -23,7 +26,7 @@ class AppWindow(ctk.CTk):
         super().__init__()
 
         self.title(APP_NOMBRE)
-        self.geometry("900x680")
+        self.geometry(f"{ANCHO_VENTANA}x{ALTO_VENTANA}")
         self.resizable(False, False)
 
         self.colors = apply_theme()
@@ -55,8 +58,9 @@ class AppWindow(ctk.CTk):
         """
         Fondo claro (no el splash negro original, que no combinaba con las
         tarjetas blancas del centro) con acentos decorativos de marca —los
-        trazos de onda de colores Bancolombia— apenas insinuados en las
-        esquinas, MUY sutiles para no competir con el contenido.
+        trazos de onda de colores Bancolombia— en las esquinas: grandes y
+        nítidos para que se noten, pero sin invadir el área central de la
+        tarjeta.
         """
         # Base clara detrás de todo.
         self.bg_label = ctk.CTkLabel(self, text="", fg_color=self.colors["background"])
@@ -64,26 +68,51 @@ class AppWindow(ctk.CTk):
 
         self._onda_images = []  # referencias vivas (si no, el GC las borra)
         self._agregar_onda(
-            "trazo-onda-11.png", ancho=620, x=-90, y=-70, opacidad=0.16
+            "trazo-onda-11.png",
+            ancho=600,
+            esquina="top-left",
+            desborde_x=40,
+            desborde_y=35,
+            opacidad=0.38,
         )
         self._agregar_onda(
             "trazo-onda-12.png",
-            ancho=620,
-            x=900 - 620 + 90,
-            y=680 - 260,
-            opacidad=0.16,
+            ancho=600,
+            esquina="bottom-right",
+            desborde_x=40,
+            desborde_y=35,
+            opacidad=0.38,
             rotar_180=True,
         )
 
-    def _agregar_onda(self, archivo, ancho, x, y, opacidad=0.16, rotar_180=False):
-        """Coloca una imagen decorativa (trazo de onda) semi-transparente."""
+    def _agregar_onda(
+        self, archivo, ancho, esquina, desborde_x, desborde_y, opacidad=0.4, rotar_180=False
+    ):
+        """
+        Coloca una imagen decorativa (trazo de onda) semi-transparente,
+        ANCLADA a una esquina de la ventana ("top-left" o "bottom-right").
+        `desborde_x`/`desborde_y` es cuánto se deja "sangrar" fuera de la
+        ventana por ese lado (para que se vea grande y cortada por el borde,
+        no un ícono flotando). El resto de la imagen (la mayor parte) queda
+        visible dentro de la ventana; como se dibuja ANTES que las tarjetas,
+        lo que quede debajo de una tarjeta simplemente no se ve.
+        """
         ruta = os.path.join(ASSETS_DIR, archivo)
         if not os.path.exists(ruta):
             return
         try:
             imagen = Image.open(ruta).convert("RGBA")
+            # Cada trazo-onda-*.png trae DOS arcos separados (uno en cada
+            # mitad de la imagen). Nos quedamos solo con el de la mitad
+            # izquierda y recortamos su margen transparente, para tener UNA
+            # línea limpia y continua en vez de mezclar los dos.
+            ancho_orig, alto_orig = imagen.size
+            mitad = imagen.crop((0, 0, ancho_orig // 2, alto_orig))
+            bbox = mitad.getbbox()
+            imagen = mitad.crop(bbox) if bbox else mitad
             if rotar_180:
                 imagen = imagen.transpose(Image.ROTATE_180)
+
             alto = int(ancho * imagen.height / imagen.width)
             imagen = imagen.resize((ancho, alto), Image.LANCZOS)
             # Bajamos la opacidad multiplicando el canal alfa (aquí no hay
@@ -93,6 +122,12 @@ class AppWindow(ctk.CTk):
 
             ctk_img = ctk.CTkImage(light_image=imagen, dark_image=imagen, size=(ancho, alto))
             self._onda_images.append(ctk_img)  # evita que el GC la recoja
+
+            if esquina == "top-left":
+                x, y = -desborde_x, -desborde_y
+            else:  # bottom-right
+                x = ANCHO_VENTANA - ancho + desborde_x
+                y = ALTO_VENTANA - alto + desborde_y
 
             label = ctk.CTkLabel(self, image=ctk_img, text="")
             label.place(x=x, y=y)
