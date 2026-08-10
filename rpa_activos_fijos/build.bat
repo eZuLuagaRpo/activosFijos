@@ -41,6 +41,14 @@ pyinstaller ^
   --collect-all an0016001_appian_flow ^
   app.py
 
+if errorlevel 1 (
+  echo.
+  echo === FALLO el empaquetado ^(ver el error de PyInstaller arriba^). NO copies dist\RPA_Activos_Fijos, no sirve. ===
+  echo.
+  pause
+  exit /b 1
+)
+
 echo.
 echo === Listo. Revisa la carpeta dist\RPA_Activos_Fijos ===
 echo.

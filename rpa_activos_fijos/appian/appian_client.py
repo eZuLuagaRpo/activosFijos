@@ -104,7 +104,17 @@ class AppianClient:
         return self._validar(respuesta, "login en Appian")
 
     def search_case(self, case_id):
-        """Busca y abre el detalle de un caso por su ID."""
+        """
+        Busca y abre el detalle de un caso por su ID, a través del módulo
+        "Seguimiento de Solicitudes" de Appian.
+
+        ⚠️ NO se usa en el Flujo 1 de este bot: para las solicitudes de la
+        Bandeja de Actividades, ese módulo de "Seguimiento" no las encuentra
+        (falla con "No se encontró información para el caso X" aunque el
+        caso exista). En su lugar, `flujo1_appian.py` navega directo a la URL
+        de la fila de la bandeja (ver `_abrir_caso_directo`). Se deja este
+        wrapper por si algún flujo futuro sí necesita buscar por ese módulo.
+        """
         if self.logger:
             self.logger.info("Abriendo caso %s...", case_id)
         respuesta = self._flow.search_case(case_id)
@@ -112,7 +122,9 @@ class AppianClient:
 
     def get_case_data(self, case_id, download_attachments=True):
         """
-        Obtiene el detalle del caso. REQUIERE haber llamado antes a search_case.
+        Obtiene el detalle del caso YA ABIERTO en pantalla (no navega a
+        ningún lado: lee lo que esté renderizado en ese momento). Sirve tanto
+        si se llegó ahí con `search_case()` como navegando directo a la URL.
         Devuelve data = {"info": DataFrame label|value, "files": [ {file,path,full_path} ]}.
         """
         if self.logger:

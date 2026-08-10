@@ -74,6 +74,19 @@ class BandejaReader:
                 return texto
         return None
 
+    def _texto_y_url_de(self, fila, lista_xpath, descripcion):
+        """
+        Como `_texto_de`, pero además devuelve el `href` del elemento (para
+        poder navegar directo a la solicitud más adelante, sin depender de
+        client.search_case()). Devuelve (texto, url); url puede ser None si
+        el elemento no es un enlace.
+        """
+        for elemento in self._buscar_con_respaldo(fila, lista_xpath, descripcion):
+            texto = (elemento.text or "").strip()
+            if texto:
+                return texto, elemento.get_attribute("href")
+        return None, None
+
     def _extraer_case_id(self, texto):
         if not texto:
             return None
@@ -124,7 +137,7 @@ class BandejaReader:
         pendientes = []
 
         for fila in filas:
-            texto_id = self._texto_de(
+            texto_id, url_caso = self._texto_y_url_de(
                 fila, BANDEJA_XPATH_ID_EN_FILA, "ID del caso en la fila"
             )
             case_id = self._extraer_case_id(texto_id)
@@ -141,8 +154,17 @@ class BandejaReader:
                 fila, BANDEJA_XPATH_FECHA_VENCIMIENTO, "fecha de vencimiento en la fila"
             )
 
+            if not url_caso and self.logger:
+                self.logger.warning(
+                    "Caso %s: la celda del ID no tiene un enlace (href). No se "
+                    "va a poder abrir directamente; revisa BANDEJA_XPATH_ID_EN_FILA.",
+                    case_id,
+                )
+
             vistos.add(case_id)
-            pendientes.append(CasoBandeja(case_id=case_id, fecha_vencimiento=fecha_texto))
+            pendientes.append(
+                CasoBandeja(case_id=case_id, fecha_vencimiento=fecha_texto, url=url_caso)
+            )
 
         if not pendientes:
             raise BandejaError(

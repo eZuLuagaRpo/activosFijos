@@ -34,9 +34,7 @@ def _procesar_un_caso(client, caso, logger):
     try:
         # --- Flujo 1: obtener la solicitud (detalle + Excel) ---
         resultado.paso = "Flujo 1 (Appian)"
-        solicitud = flujo1_appian.obtener_solicitud(
-            client, case_id, fecha_vencimiento=caso.fecha_vencimiento, logger=logger
-        )
+        solicitud = flujo1_appian.obtener_solicitud(client, caso, logger=logger)
 
         # --- Flujo 2: transformar al formato macro ---
         resultado.paso = "Flujo 2 (Transformación)"

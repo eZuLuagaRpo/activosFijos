@@ -197,6 +197,38 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-10 — Primera prueba real: `search_case()` no sirve para estas
+  solicitudes; se navega directo a la URL de la bandeja.**
+  - **Hallazgo (con log real de una ejecución en Appian):** la bandeja se lee
+    perfecto (7 solicitudes, filtro y orden por prioridad correctos), pero
+    `AppianClient.search_case(case_id)` fallaba para el 100% de los casos con
+    "No se encontró información para el caso X". Revisando el código fuente
+    de la librería (`an0016001_appian_flow/cases_page.py`), se confirmó que
+    `search_case()` busca en el módulo **"Seguimiento de Solicitudes"** de
+    Appian — un módulo DISTINTO a la Bandeja de Actividades — donde estas
+    tareas no aparecen. No es un bug de nuestro código ni de la librería, es
+    el módulo equivocado para este caso de uso.
+  - Se confirmó (leyendo `get_case_data()` en la librería) que **no depende
+    de haber llamado `search_case()` antes**: solo lee lo que esté
+    renderizado en pantalla en ese momento. Por eso la solución es navegar
+    directo a la URL de cada solicitud.
+  - `core/models.py`: `CasoBandeja` ahora también guarda `url` (el `href`
+    del enlace del ID en la fila de la bandeja).
+  - `appian/bandeja_reader.py`: `listar_pendientes()` captura ese `href`
+    junto con el texto del ID (nuevo método `_texto_y_url_de`).
+  - `flujos/flujo1_appian.py`: nueva función `_abrir_caso_directo()` que
+    hace `client.driver.get(caso.url)` en vez de `client.search_case()`.
+    `obtener_solicitud()` ahora recibe el `CasoBandeja` completo (antes
+    recibía `case_id`/`fecha_vencimiento` sueltos).
+  - `appian/appian_client.py`: documentado por qué `search_case()` no se usa
+    en este flujo (se deja el wrapper por si algún flujo futuro sí lo
+    necesita).
+  - **Pendiente de confirmar en la próxima prueba:** que `get_case_data()`
+    funcione bien navegando directo (su decorador `_require_app_ready()`
+    espera un elemento de menú "Bandeja de Actividades"; si esa es una
+    pestaña de navegación persistente del sitio, como sugiere la URL
+    capturada, debería seguir presente en la página del caso).
+
 - **2026-08-04 — Selectores/labels reales cargados + rediseño de detección
   de tipo/acción.**
   - `config.py`: `BANDEJA_XPATH_FILAS`, `BANDEJA_XPATH_ID_EN_FILA`,

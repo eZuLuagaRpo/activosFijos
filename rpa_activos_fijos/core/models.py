@@ -19,6 +19,9 @@ class CasoBandeja:
 
     case_id: str                              # ej. "PDA-7133"
     fecha_vencimiento: Optional[str] = None   # texto crudo, ej. "06/10/2026 12:00"
+    url: Optional[str] = None                 # href de la fila; se navega directo ahí
+    # en vez de usar client.search_case(), que busca en "Seguimiento de
+    # Solicitudes" (un módulo distinto de Appian donde estas tareas no aparecen).
 
 
 @dataclass

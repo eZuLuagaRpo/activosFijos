@@ -4,8 +4,11 @@ flujos/flujo1_appian.py — FLUJO 1: Appian (bandeja + detalle + descarga).
 Responsabilidad de este flujo:
   1. Leer la Bandeja de Actividades y obtener las solicitudes pendientes de
      Parametrización de Activos, en orden de prioridad (BandejaReader).
-  2. Por cada caso: abrirlo, leer la sección "Detalles" para identificar QUÉ
-     tipo de activo y QUÉ acción aplica, y descargar el Excel adjunto.
+  2. Por cada caso: abrirlo NAVEGANDO DIRECTO a la URL capturada en la
+     bandeja (NO con client.search_case(), que busca en "Seguimiento de
+     Solicitudes" — un módulo distinto donde estas tareas no aparecen), leer
+     la sección "Detalles" para identificar QUÉ tipo de activo y QUÉ acción
+     aplica, y descargar el Excel adjunto.
   3. Devolver una lista de objetos `Solicitud` lista para el Flujo 2.
 
 Cómo se identifica el tipo de activo y la acción:
@@ -122,6 +125,30 @@ def _extraer_tipo_y_accion_detalle(client, case_id, logger=None):
     return tipo, accion, tipo_crudo, accion_cruda
 
 
+def _abrir_caso_directo(client, case_id, url, logger=None):
+    """
+    Navega directo a la URL de la solicitud (capturada en la bandeja) en vez
+    de usar client.search_case(). Se descubrió que search_case() busca en el
+    módulo "Seguimiento de Solicitudes" de Appian, que es un módulo DISTINTO
+    a la Bandeja de Actividades y donde estas tareas no aparecen — por eso
+    fallaba con "No se encontró información para el caso X" aunque el caso sí
+    existía y era perfectamente accesible desde la bandeja.
+    """
+    if not url:
+        raise AppianError(
+            f"Caso {case_id}: no se capturó la URL de la fila en la bandeja "
+            "(revisa BANDEJA_XPATH_ID_EN_FILA en config.py, la celda del ID "
+            "debe ser un enlace <a> con href)."
+        )
+    try:
+        client.driver.get(url)
+    except Exception as e:
+        raise AppianError(f"No se pudo navegar al caso {case_id}: {e}")
+
+    if logger:
+        logger.info("Caso %s: navegación directa OK.", case_id)
+
+
 def _tomar_excel(files, case_id):
     """
     De la lista de adjuntos descargados por la librería, toma la ruta del
@@ -190,18 +217,22 @@ def _descargar_adjunto_manual(client, case_id, logger=None):
     )
 
 
-def obtener_solicitud(client, case_id, fecha_vencimiento=None, logger=None):
+def obtener_solicitud(client, caso, logger=None):
     """
-    Procesa UN caso: search_case -> detalle (tipo/acción) -> descarga adjunto
-    -> construye la Solicitud.
+    Procesa UN caso (un `CasoBandeja`, ya con su URL de la bandeja): navega
+    directo -> detalle (tipo/acción) -> descarga adjunto -> construye la
+    Solicitud.
 
     Las llamadas web van envueltas en reintentos con backoff. Si algo falla de
     forma definitiva, se propaga la excepción para que el llamador
     (orquestador) la registre y continúe con el siguiente caso.
     """
-    # 1) Abrir el caso (con reintentos).
+    case_id = caso.case_id
+    fecha_vencimiento = caso.fecha_vencimiento
+
+    # 1) Abrir el caso navegando directo a su URL (con reintentos).
     ejecutar_con_reintentos(
-        lambda: client.search_case(case_id),
+        lambda: _abrir_caso_directo(client, case_id, caso.url, logger=logger),
         excepciones=(AppianError,),
         logger=logger,
         descripcion=f"abrir caso {case_id}",

@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: AN0016001-appian-flow
+Version: 1.0.3
+Summary: Automatización de flujos Appian utilizando Selenium y procesamiento de datos.
+Home-page: https://grupobancolombia.visualstudio.com/Vicepresidencia%20de%20Innovaci%C3%B3n%20y%20Transformaci%C3%B3n%20Digital/_git/AN0016001-appian-flow
+Author: Alejandro Betancur
+Author-email: abechav@bancolombia.com.co
+License: MIT
+Requires-Dist: selenium==4.36.0
+Requires-Dist: pandas>=1.5.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: home-page
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: summary
