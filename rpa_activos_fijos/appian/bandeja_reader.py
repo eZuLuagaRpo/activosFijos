@@ -93,6 +93,32 @@ class BandejaReader:
         coincidencia = self._regex_id.search(texto)
         return coincidencia.group(0) if coincidencia else None
 
+    def _esperar_fecha_cargada(self, filas):
+        """
+        Espera a que la fecha de vencimiento de la PRIMERA fila esté
+        poblada antes de leer toda la tabla. A veces esa columna termina de
+        cargar sus datos un instante después de que aparecen las filas (más
+        notorio con internet lento); sin esta espera, se lee la celda
+        todavía vacía y el caso queda sin fecha.
+        """
+        if not filas:
+            return
+        try:
+            self.client.wait.until(
+                lambda d: bool(
+                    self._texto_de(
+                        filas[0], BANDEJA_XPATH_FECHA_VENCIMIENTO, "fecha (espera)"
+                    )
+                )
+            )
+        except Exception:
+            if self.logger:
+                self.logger.warning(
+                    "La columna de Fecha de Vencimiento tardó más de lo "
+                    "esperado en cargar; se sigue igual (puede quedar algún "
+                    "caso sin fecha)."
+                )
+
     def _parsear_fecha(self, texto):
         """Convierte el texto de la fecha a datetime, o None si no se puede."""
         if not texto:
@@ -131,6 +157,8 @@ class BandejaReader:
                 "No se encontraron filas en la Bandeja de Actividades. "
                 "Revisa BANDEJA_XPATH_FILAS en config.py."
             )
+
+        self._esperar_fecha_cargada(filas)
 
         nombre_esperado_norm = normalizar(BANDEJA_NOMBRE_FLUJO_ESPERADO)
         vistos = set()

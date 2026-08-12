@@ -31,7 +31,7 @@ for _carpeta in (DOWNLOAD_DIR, OUTPUT_DIR, LOG_DIR):
 APPIAN_URL = "https://CAMBIAR-POR-URL-REAL-DE-APPIAN"
 
 BROWSER = "edge"
-TIMEOUT = 90
+TIMEOUT = 120  # subido de 90s: con internet lento algunas cargas tardaban más.
 TIMEOUT_FILES = 600
 
 
@@ -133,9 +133,15 @@ ALIAS_ACCION = {
 # acción real; si el bot encuentra más de uno, no adivina: marca el caso como
 # fallido para revisión manual (ver flujos/flujo1_appian.py).
 
-# XPath del contenedor de esa sección completa (capturado en Appian real).
+# XPath del contenedor de esa sección completa. NO se usa un ID de Appian
+# (aunque lo hayamos capturado alguna vez): esos IDs son generados
+# dinámicamente en cada render y NO son estables entre casos ni sesiones —
+# confirmado el 2026-08-11, cuando el ID capturado dejó de encontrarse en
+# TODOS los casos de una corrida nueva. En su lugar, se busca por el texto
+# visible del encabezado ("Detalles"), igual que hace la librería
+# internamente para leer sus propias secciones (rol='region' + <h2>).
 DETALLE_XPATH_SECCION_ACTIVOS = (
-    '//*[@id="f868ae114fc7b69e3840a9e5db2ddaee_sectionContents"]/div/div/div/div'
+    "//div[@role='region' and .//h2[normalize-space(.)='Detalles']]"
 )
 
 # Texto que indica "este tipo no aplica" en el renglón.
@@ -153,7 +159,12 @@ LABELS_ACTIVOS_DETALLE = {
 
 # Botón de descarga de adjuntos, SOLO como respaldo manual por si
 # get_case_data(download_attachments=True) de la librería no descarga el
-# Excel solo (todavía sin confirmar).
+# Excel solo. CONFIRMADO (2026-08-11) que la descarga automática de la
+# librería SÍ funciona, así que este respaldo no se ha necesitado todavía.
+# ⚠️ Usa el mismo patrón de ID hasheado que resultó inestable en
+# DETALLE_XPATH_SECCION_ACTIVOS (ver nota arriba) — si algún día SÍ hace
+# falta este respaldo y falla, probablemente haya que rehacerlo con un
+# selector por texto en vez de por ID.
 DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO = (
     '//*[@id="459088681f2b464483d3c469e4838095_sectionContents"]'
     '/div/div/div/div/div[3]/div[2]/div/div/div/div/button/span/span[2]'

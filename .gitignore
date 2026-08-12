@@ -1,0 +1,5 @@
+# Copias informativas de la librería privada de Appian, extraídas del venv
+# solo para poder leer su código fuente durante el desarrollo. Es código
+# propietario (no nuestro) y NO debe subirse al repositorio.
+an0016001_appian_flow/
+an0016001_appian_flow-1.0.3.dist-info/

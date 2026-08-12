@@ -197,6 +197,38 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-11 — Segunda prueba real: dos hallazgos más (IDs de Appian
+  inestables + falta de espera en la bandeja).**
+  - **Confirmado que la navegación directa (fix de ayer) funciona**: los 5
+    casos de la corrida navegaron bien y `get_case_data()` descargó los
+    adjuntos automáticamente (sin necesitar el respaldo manual).
+  - **Hallazgo nuevo**: `DETALLE_XPATH_SECCION_ACTIVOS` (el XPath de la
+    sección "Detalles") fallaba en el 100% de los casos con "no such
+    element". El ID que se había capturado
+    (`f868ae114fc7b69e3840a9e5db2ddaee_sectionContents`) es un ID que Appian
+    genera **dinámicamente en cada render** — no es estable entre casos ni
+    sesiones. Se cambió a buscar la sección por su **texto visible**
+    ("Detalles"), con el mismo patrón que usa la librería internamente
+    (`div[@role='region']` + `<h2>`), en vez de por ID.
+  - ⚠️ `DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO` usa el mismo patrón de ID
+    hasheado y por lo tanto tiene el mismo riesgo — no se ha tocado porque
+    no ha fallado (la descarga automática de la librería está funcionando),
+    pero si algún día hace falta y falla, aplicar el mismo tipo de arreglo.
+  - **Hallazgo nuevo**: la fecha de vencimiento llegó vacía (`None`) en
+    los 5 casos de esta corrida (antes sí funcionaba). `bandeja_reader.py`
+    no esperaba nada antes de leer la tabla; con internet más lento, lee la
+    celda de fecha antes de que termine de poblarse. Se agregó
+    `_esperar_fecha_cargada()`: espera (con el mismo `TIMEOUT` de
+    `config.py`) a que la fecha de la primera fila esté poblada antes de
+    leer toda la tabla.
+  - `config.py`: `TIMEOUT` subido de 90 a 120 segundos, como colchón general
+    para conexiones más lentas.
+  - **Lección general para el resto del proyecto**: evitar XPath basados en
+    IDs largos/hasheados de Appian (`id="xxxxxxxxxxxxxxxxxxxx_sectionContents"`),
+    porque no son estables. Preferir selectores por texto visible o
+    estructura (rol, encabezado), como ya se hace en `BANDEJA_XPATH_*`
+    (que sí son estables, confirmado en dos corridas con casos distintos).
+
 - **2026-08-10 — Primera prueba real: `search_case()` no sirve para estas
   solicitudes; se navega directo a la URL de la bandeja.**
   - **Hallazgo (con log real de una ejecución en Appian):** la bandeja se lee
