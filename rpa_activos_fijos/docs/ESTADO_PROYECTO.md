@@ -197,6 +197,20 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-18 — Tercera prueba real: faltaba esperar a que aparecieran las
+  filas de la bandeja (no solo la fecha dentro de ellas).**
+  - Con internet más lento, `listar_pendientes()` revisaba si había filas
+    en el MISMO instante en que terminaba el login, sin ningún margen —
+    "Leyendo la Bandeja..." y "No se encontraron filas..." aparecían en el
+    mismo segundo del log. La espera que se agregó el 2026-08-11
+    (`_esperar_fecha_cargada`) solo actúa DESPUÉS de encontrar filas; el
+    hueco real estaba un paso antes, en la aparición misma de las filas.
+  - `appian/bandeja_reader.py`: nueva `_esperar_filas()`, con el mismo
+    patrón de espera ACTIVA (sondea repetidamente y sigue apenas encuentra
+    algo, tope de `TIMEOUT` en `config.py`, no revienta si se agota — deja
+    que el chequeo normal reporte el error de siempre). Se llama al inicio
+    de `listar_pendientes()`, antes del primer chequeo de filas.
+
 - **2026-08-11 — Segunda prueba real: dos hallazgos más (IDs de Appian
   inestables + falta de espera en la bandeja).**
   - **Confirmado que la navegación directa (fix de ayer) funciona**: los 5

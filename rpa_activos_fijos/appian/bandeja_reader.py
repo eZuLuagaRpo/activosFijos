@@ -93,6 +93,34 @@ class BandejaReader:
         coincidencia = self._regex_id.search(texto)
         return coincidencia.group(0) if coincidencia else None
 
+    def _esperar_filas(self):
+        """
+        Espera ACTIVAMENTE a que aparezca al menos una fila en la tabla de la
+        bandeja antes de darla por vacía (sondea repetidamente y sigue apenas
+        encuentra algo; no es una pausa fija). Con internet lento, la tabla
+        puede tardar un poco en pintar sus filas después del login; sin esta
+        espera se estaba revisando en el mismo instante y se daba por vacía
+        de inmediato.
+
+        Si de verdad no aparece nada dentro del tope (TIMEOUT en config.py),
+        no revienta aquí: sigue y deja que el chequeo normal de
+        `listar_pendientes` reporte el error de siempre.
+        """
+        try:
+            self.client.wait.until(
+                lambda d: bool(
+                    self._buscar_con_respaldo(
+                        d, BANDEJA_XPATH_FILAS, "filas de la bandeja (espera)"
+                    )
+                )
+            )
+        except Exception:
+            if self.logger:
+                self.logger.warning(
+                    "La tabla de la Bandeja de Actividades tardó más de lo "
+                    "esperado en mostrar filas."
+                )
+
     def _esperar_fecha_cargada(self, filas):
         """
         Espera a que la fecha de vencimiento de la PRIMERA fila esté
@@ -148,6 +176,8 @@ class BandejaReader:
         """
         if self.logger:
             self.logger.info("Leyendo la Bandeja de Actividades...")
+
+        self._esperar_filas()
 
         filas = self._buscar_con_respaldo(
             self.driver, BANDEJA_XPATH_FILAS, "filas de la bandeja"
