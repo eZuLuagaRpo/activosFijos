@@ -76,8 +76,12 @@ BANDEJA_NOMBRE_FLUJO_ESPERADO = "Parametrización de Activos"
 # Celda con la fecha de vencimiento (columna "Fecha De Vencimiento
 # (Solicitud)"), relativo a la fila. Se usa para procesar por PRIORIDAD (la
 # que vence antes, primero).
+# NOTA: el primer selector capturado (".../div/p/span") dejó de encontrarse
+# (confirmado 2026-08-18: la espera agotó los 120s completos sin resultado,
+# no fue un tema de lentitud). El de abajo se volvió a capturar y quedó sin
+# el "/span" final.
 BANDEJA_XPATH_FECHA_VENCIMIENTO = [
-    './/td[13]/div/p/span',
+    './/td[13]/div/p',
 ]
 # Formato en el que Appian muestra la fecha, ej. "06/10/2026 12:00".
 BANDEJA_FORMATO_FECHA = "%d/%m/%Y %H:%M"
@@ -144,8 +148,12 @@ DETALLE_XPATH_SECCION_ACTIVOS = (
     "//div[@role='region' and .//h2[normalize-space(.)='Detalles']]"
 )
 
-# Texto que indica "este tipo no aplica" en el renglón.
-DETALLE_VALOR_VACIO = "-"
+# Textos que indican "este tipo no aplica" en el renglón. Appian renderiza
+# un GUION MEDIO ("–", en dash, Unicode U+2013) y NO el guion normal ("-"),
+# confirmado el 2026-08-18 (todos los renglones se leían como "con acción"
+# porque "–" != "-"). Se aceptan varias variantes para no depender de cuál
+# use Appian en cada pantalla.
+DETALLE_VALORES_VACIOS = ("-", "–", "—")
 
 # Texto EXACTO de cada renglón tal como aparece en Appian -> tipo canónico.
 LABELS_ACTIVOS_DETALLE = {

@@ -197,6 +197,26 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-18 (2) — Cuarta prueba real: guion equivocado (falso "múltiples
+  activos") + selector de fecha desactualizado.**
+  - **Hallazgo 1**: en TODOS los casos fallidos, el log mostraba "más de un
+    tipo de activo trae acción a la vez" con los 6 renglones listados. La
+    causa: Appian renderiza el "vacío" con un **guion medio** ("–", en dash,
+    U+2013), no el guion normal ("-") que teníamos configurado en
+    `DETALLE_VALOR_VACIO`. Como nunca coincidían, el bot trataba TODOS los
+    renglones como "con acción". Se reemplazó por
+    `DETALLE_VALORES_VACIOS = ("-", "–", "—")` (config.py) y la comparación
+    en `flujo1_appian._extraer_tipo_y_accion_detalle` ahora es "está en la
+    lista", no "es igual a un único valor".
+  - **Hallazgo 2**: `BANDEJA_XPATH_FECHA_VENCIMIENTO` (`.//td[13]/div/p/span`)
+    dejó de encontrar nada — confirmado que fue el selector y no timing,
+    porque la espera agotó los 120s completos sin resultado. Se volvió a
+    capturar y la usuaria confirmó que ya no tiene el `/span` final; ahora
+    es `.//td[13]/div/p`.
+  - **Lección**: cuando una espera agota TODO el tiempo configurado sin
+    éxito, es una señal fuerte de selector roto (no de lentitud) — si fuera
+    solo lentitud, normalmente se resuelve mucho antes del tope.
+
 - **2026-08-18 — Tercera prueba real: faltaba esperar a que aparecieran las
   filas de la bandeja (no solo la fecha dentro de ellas).**
   - Con internet más lento, `listar_pendientes()` revisaba si había filas

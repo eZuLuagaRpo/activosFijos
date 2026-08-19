@@ -15,9 +15,11 @@ Cómo se identifica el tipo de activo y la acción:
   La sección "Detalles" del caso trae un renglón FIJO por cada tipo de activo
   posible (Máscara, Activos BRP, Activos PRJ, Activos Diferidos y
   Renovaciones, Mejoras, Segunda Información). Debajo de cada nombre aparece
-  la acción a realizar (Crear/Modificar/Eliminar) o un guion "-" si ese tipo
-  no aplica. Se confirmó con la usuaria que SOLO UNO debe traer una acción
-  real; si aparece más de uno, no se adivina: se marca el caso como fallido.
+  la acción a realizar (Crear/Modificar/Eliminar) o un guion (ver
+  DETALLE_VALORES_VACIOS en config.py — Appian usa guion medio "–", no el
+  guion normal "-") si ese tipo no aplica. Se confirmó con la usuaria que
+  SOLO UNO debe traer una acción real; si aparece más de uno, no se
+  adivina: se marca el caso como fallido.
 
 Reglas clave:
   - Se valida SIEMPRE el resultado de cada llamada (lo hace AppianClient).
@@ -33,7 +35,7 @@ from selenium.webdriver.common.by import By
 from appian.bandeja_reader import BandejaReader
 from config import (
     ALIAS_ACCION,
-    DETALLE_VALOR_VACIO,
+    DETALLE_VALORES_VACIOS,
     DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO,
     DETALLE_XPATH_SECCION_ACTIVOS,
     DOWNLOAD_DIR,
@@ -78,7 +80,7 @@ def _extraer_tipo_y_accion_detalle(client, case_id, logger=None):
     """
     lineas = _leer_lineas_seccion_activos(client, case_id)
     lineas_norm = [normalizar(linea) for linea in lineas]
-    vacio_norm = normalizar(DETALLE_VALOR_VACIO)
+    vacios_norm = {normalizar(v) for v in DETALLE_VALORES_VACIOS}
 
     encontrados = []
     for label_texto, tipo_canonico in LABELS_ACTIVOS_DETALLE.items():
@@ -89,7 +91,7 @@ def _extraer_tipo_y_accion_detalle(client, case_id, logger=None):
         if indice + 1 >= len(lineas):
             continue
         valor_crudo = lineas[indice + 1]
-        if normalizar(valor_crudo) == vacio_norm:
+        if normalizar(valor_crudo) in vacios_norm:
             continue
         encontrados.append((tipo_canonico, label_texto, valor_crudo))
 
@@ -97,11 +99,11 @@ def _extraer_tipo_y_accion_detalle(client, case_id, logger=None):
         if logger:
             logger.warning(
                 "Caso %s: ningún renglón de la sección Detalles trae una "
-                "acción (todos están en '%s'). Revisa "
+                "acción (todos están vacíos: %s). Revisa "
                 "DETALLE_XPATH_SECCION_ACTIVOS y LABELS_ACTIVOS_DETALLE en "
                 "config.py.",
                 case_id,
-                DETALLE_VALOR_VACIO,
+                DETALLE_VALORES_VACIOS,
             )
         return None, None, None, None
 
