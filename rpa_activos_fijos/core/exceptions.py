@@ -49,3 +49,12 @@ class MultiplesActivosError(RPAError):
     """Más de un renglón de la sección 'Detalles' trae una acción a la vez
     (se esperaba que solo uno aplicara). No es un error de comunicación con
     Appian, así que NO se reintenta."""
+
+
+class MultiplesAdjuntosError(RPAError):
+    """El caso trae más de un Excel adjunto y no se sabe cuál usar (pendiente
+    de confirmar con la dueña de la automatización si es error del usuario o
+    un caso legítimo). Por ahora no se adivina: se deja para revisión manual.
+    A propósito NO hereda de SinAdjuntosError: el problema no es "no hay
+    adjuntos" (eso dispara el respaldo de descarga manual), es que hay
+    ambigüedad sobre cuál de los que sí llegaron usar."""

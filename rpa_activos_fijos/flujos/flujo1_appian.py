@@ -42,7 +42,12 @@ from config import (
     LABELS_ACTIVOS_DETALLE,
     TIMEOUT_FILES,
 )
-from core.exceptions import AppianError, MultiplesActivosError, SinAdjuntosError
+from core.exceptions import (
+    AppianError,
+    MultiplesActivosError,
+    MultiplesAdjuntosError,
+    SinAdjuntosError,
+)
 from core.models import Solicitud
 from core.retry import ejecutar_con_reintentos
 from core.texto import mapear_alias, normalizar
@@ -154,22 +159,38 @@ def _abrir_caso_directo(client, case_id, url, logger=None):
 def _tomar_excel(files, case_id):
     """
     De la lista de adjuntos descargados por la librería, toma la ruta del
-    primer Excel.
+    Excel.
 
     Raises:
         SinAdjuntosError: si no hay adjuntos o ninguno es un Excel.
+        MultiplesAdjuntosError: si hay MÁS DE UN Excel adjunto. Pasó en un
+            caso real (2026-08-18): el usuario adjuntó dos. Pendiente de
+            confirmar con la dueña de la automatización si es error del
+            usuario o un caso legítimo — mientras tanto, no se adivina cuál
+            usar, se deja el caso para revisión manual.
     """
     if not files:
         raise SinAdjuntosError(f"El caso {case_id} no trae adjuntos.")
 
-    for adjunto in files:
-        nombre = (adjunto.get("file") or "").lower()
-        if nombre.endswith((".xlsx", ".xls", ".xlsm")):
-            return adjunto.get("full_path")
+    excels = [
+        adjunto
+        for adjunto in files
+        if (adjunto.get("file") or "").lower().endswith((".xlsx", ".xls", ".xlsm"))
+    ]
 
-    raise SinAdjuntosError(
-        f"El caso {case_id} trae adjuntos pero ninguno parece un Excel."
-    )
+    if not excels:
+        raise SinAdjuntosError(
+            f"El caso {case_id} trae adjuntos pero ninguno parece un Excel."
+        )
+
+    if len(excels) > 1:
+        nombres = ", ".join(e.get("file") for e in excels)
+        raise MultiplesAdjuntosError(
+            f"El caso {case_id} trae {len(excels)} Excel adjuntos ({nombres}). "
+            "No se sabe cuál usar; se deja para revisión manual."
+        )
+
+    return excels[0].get("full_path")
 
 
 def _descargar_adjunto_manual(client, case_id, logger=None):
@@ -219,6 +240,53 @@ def _descargar_adjunto_manual(client, case_id, logger=None):
     )
 
 
+def _normalizar_nombre_excel(case_id, tipo, accion, excel_path, logger=None):
+    """
+    Renombra el Excel ya descargado a un nombre predecible:
+    CASE_ID_tipo_accion.ext — usando los valores CANÓNICOS de tipo/acción
+    (ej. "brp", "modificacion"), no el texto crudo de Appian. Se conserva la
+    extensión de origen tal cual (.xlsx o .xlsm).
+
+    Si el mismo caso se vuelve a procesar, el nombre sale igual y se
+    SOBREESCRIBE (decisión de negocio: el Excel descargado es un insumo de
+    trabajo, no un histórico — el histórico real queda en salidas/).
+
+    Si falta tipo/acción (no se pudieron identificar) o el renombre falla
+    por cualquier razón, se deja el archivo con su nombre original: nunca
+    hace fallar el caso por esto.
+    """
+    if not excel_path or not tipo or not accion:
+        return excel_path
+
+    carpeta = os.path.dirname(excel_path)
+    _, extension = os.path.splitext(excel_path)
+    ruta_nueva = os.path.join(carpeta, f"{case_id}_{tipo}_{accion}{extension}")
+
+    if os.path.abspath(ruta_nueva) == os.path.abspath(excel_path):
+        return excel_path
+
+    try:
+        if os.path.exists(ruta_nueva):
+            os.remove(ruta_nueva)  # sobreescribir si el caso ya se había procesado
+        os.rename(excel_path, ruta_nueva)
+    except Exception as e:
+        if logger:
+            logger.warning(
+                "Caso %s: no se pudo renombrar el Excel descargado (se sigue "
+                "con el nombre original '%s'): %s",
+                case_id,
+                os.path.basename(excel_path),
+                e,
+            )
+        return excel_path
+
+    if logger:
+        logger.info(
+            "Caso %s: Excel renombrado -> %s", case_id, os.path.basename(ruta_nueva)
+        )
+    return ruta_nueva
+
+
 def obtener_solicitud(client, caso, logger=None):
     """
     Procesa UN caso (un `CasoBandeja`, ya con su URL de la bandeja): navega
@@ -266,6 +334,12 @@ def obtener_solicitud(client, caso, logger=None):
         excel_path = _tomar_excel(files, case_id)
     except SinAdjuntosError:
         excel_path = _descargar_adjunto_manual(client, case_id, logger=logger)
+
+    # 5) Renombrar el Excel descargado a CASE_ID_tipo_accion.ext, ya con
+    #    tipo/acción conocidos (paso 3). No falla el caso si algo sale mal.
+    excel_path = _normalizar_nombre_excel(
+        case_id, tipo, accion, excel_path, logger=logger
+    )
 
     solicitud = Solicitud(
         case_id=case_id,

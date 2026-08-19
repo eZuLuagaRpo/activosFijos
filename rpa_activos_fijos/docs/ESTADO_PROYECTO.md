@@ -197,6 +197,26 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 > Añade aquí una línea **cada vez** que cambies algo.
 
+- **2026-08-18 (3) — Nombre normalizado del Excel descargado + manejo de
+  múltiples adjuntos.**
+  - `flujos/flujo1_appian.py`: nueva `_normalizar_nombre_excel()`. Una vez
+    conocidos tipo/acción (paso 3 de `obtener_solicitud`), el Excel
+    descargado se renombra a `CASE_ID_tipo_accion.ext` usando los valores
+    CANÓNICOS (ej. `PDA-7889_brp_modificacion.xlsx`), conservando la
+    extensión de origen (.xlsx/.xlsm). Si el mismo caso se reprocesa,
+    **sobrescribe** (decisión de negocio: es un insumo de trabajo, no un
+    histórico). Si falla el renombre o falta tipo/acción, se deja el
+    nombre original — nunca hace fallar el caso por esto.
+  - **Hallazgo real** (misma corrida): un caso trajo **2 Excels adjuntos**
+    (el usuario adjuntó dos). Pendiente confirmar con la dueña de la
+    automatización si es error del usuario o un escenario legítimo a
+    soportar más adelante. Mientras tanto: `_tomar_excel()` detecta cuando
+    hay más de un Excel entre los adjuntos y lanza `MultiplesAdjuntosError`
+    (nueva, en `core/exceptions.py`) — no adivina cuál usar, el caso queda
+    marcado como fallido para revisión manual. A propósito NO hereda de
+    `SinAdjuntosError` (para que no dispare por error el respaldo de
+    descarga manual, que no tiene sentido en este escenario).
+
 - **2026-08-18 (2) — Cuarta prueba real: guion equivocado (falso "múltiples
   activos") + selector de fecha desactualizado.**
   - **Hallazgo 1**: en TODOS los casos fallidos, el log mostraba "más de un
