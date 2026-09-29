@@ -15,13 +15,35 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
+DOWNLOAD_TEST_DIR = os.path.join(BASE_DIR, "downloads_test")  # ver MODO PRUEBAS abajo
+CARGA_SAP_DIR = os.path.join(BASE_DIR, "carga_sap")  # ver NOMBRE_ARCHIVO_SAP abajo
 OUTPUT_DIR = os.path.join(BASE_DIR, "salidas")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-MAPPING_DIR = os.path.join(BASE_DIR, "transformacion", "mapping")
 
-for _carpeta in (DOWNLOAD_DIR, OUTPUT_DIR, LOG_DIR):
+for _carpeta in (DOWNLOAD_DIR, DOWNLOAD_TEST_DIR, CARGA_SAP_DIR, OUTPUT_DIR, LOG_DIR):
     os.makedirs(_carpeta, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# MODO PRUEBAS — REEMPLAZO DEL EXCEL (TEMPORAL)
+# ---------------------------------------------------------------------------
+# Existe SOLO mientras los usuarios siguen adjuntando el formato VIEJO de
+# Excel en Appian (con el cual la validación siempre falla).
+#
+#   False -> FLUJO REAL: se usa el Excel tal cual viene adjunto en Appian.
+#   True  -> Todo lo de Appian es real (bandeja, solicitud, tipo/acción,
+#            descarga), pero el Excel que se valida y se lleva a SAP es el
+#            que TÚ dejaste en DOWNLOAD_TEST_DIR con el nombre EXACTO del
+#            número de la solicitud, ej:  downloads_test/PDA-7889.xlsm
+#            (BRP - Creación solo acepta .xlsm)
+#            - Solicitudes SIN archivo en esa carpeta se OMITEN (ni se abren).
+#            - Tu archivo nunca se modifica: el bot trabaja sobre una copia
+#              en downloads/ llamada  PDA-7889_brp_creacion_PRUEBA.xlsm
+#            - El adjunto real de Appian se descarga igual y NO se borra.
+#
+# ⚠️ Déjalo en False en el .exe que se entrega a la usuaria.
+MODO_PRUEBAS_REEMPLAZO = False
 
 
 # ---------------------------------------------------------------------------
@@ -94,16 +116,10 @@ BANDEJA_REGEX_CASE_ID = r"[A-Z]{2,5}-\d{2,}"
 # ---------------------------------------------------------------------------
 # DOMINIO DE NEGOCIO — TIPOS DE ACTIVO Y ACCIONES
 # ---------------------------------------------------------------------------
-# Acciones y su código de macro asociado.
-ACCION_CREACION = "creacion"          # AS01
-ACCION_MODIFICACION = "modificacion"  # AS02
+# Acciones canónicas.
+ACCION_CREACION = "creacion"
+ACCION_MODIFICACION = "modificacion"
 ACCION_ELIMINACION = "eliminacion"
-
-CODIGO_MACRO_POR_ACCION = {
-    ACCION_CREACION: "AS01",
-    ACCION_MODIFICACION: "AS02",
-    ACCION_ELIMINACION: "ELIM",   # TODO: CONFIRMAR el código real de eliminación
-}
 
 # Tipos de activo canónicos (los 6 renglones fijos de la sección "Detalles").
 TIPO_MASCARAS = "mascaras"
@@ -177,6 +193,21 @@ DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO = (
     '//*[@id="459088681f2b464483d3c469e4838095_sectionContents"]'
     '/div/div/div/div/div[3]/div[2]/div/div/div/div/button/span/span[2]'
 )
+
+
+# ---------------------------------------------------------------------------
+# SAP — NOMBRE EXACTO DEL ARCHIVO QUE SE CARGA
+# ---------------------------------------------------------------------------
+# En la carga masiva, SAP exige que la plantilla se llame EXACTAMENTE así
+# (confirmado con la usuaria funcional, 2026-09-28; mayúsculas tal cual).
+# Los Excel se descargan como CASE_ID_tipo_accion.xlsm (para saber de qué
+# solicitud es cada uno) y, JUSTO ANTES de cargar a SAP, el bot hace una
+# COPIA temporal con este nombre en CARGA_SAP_DIR. Como SAP procesa una
+# solicitud a la vez, esa copia se reemplaza en cada caso. En SAP se busca
+# el archivo con el explorador, así que la carpeta no tiene que ser una fija.
+NOMBRE_ARCHIVO_SAP = {
+    (TIPO_BRP, ACCION_CREACION): "CREAR (BRP).xlsm",
+}
 
 
 # ---------------------------------------------------------------------------

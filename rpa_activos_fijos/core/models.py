@@ -35,6 +35,7 @@ class Solicitud:
     tipo: Optional[str] = None        # tipo de activo canónico (ver config.py)
     accion: Optional[str] = None      # acción canónica (creacion/modificacion/...)
     excel_path: Optional[str] = None  # ruta completa del Excel descargado de Appian
+    archivo_sap: Optional[str] = None  # copia con el nombre que exige SAP (Flujo 3)
     info_df: Any = None               # DataFrame label|value con todo el detalle
     fecha_vencimiento: Optional[str] = None  # heredada de la bandeja (prioridad)
 
@@ -44,12 +45,54 @@ class Solicitud:
 
 
 @dataclass
-class ArchivoMacro:
-    """Un archivo Excel de salida ya en formato macro, listo para SAP (Flujo 3)."""
+class ResultadoFila:
+    """Resultado de validar UNA fila de datos de la plantilla (= un activo)."""
 
-    ruta: str                         # ruta completa del Excel generado
-    accion: str                       # creacion / modificacion / eliminacion
-    codigo_macro: str                 # AS01 / AS02 / ELIM
+    fila: int                                            # número de fila en Excel (2, 3, ...)
+    errores: List[str] = field(default_factory=list)     # invalidan la fila
+    advertencias: List[str] = field(default_factory=list)  # solo informan
+
+    @property
+    def valida(self):
+        return not self.errores
+
+
+@dataclass
+class ResultadoValidacion:
+    """
+    Resultado de validar la plantilla Excel de una solicitud (Flujo 2).
+
+    Regla de negocio "todo o nada": la plantilla solo es válida si la
+    estructura está bien Y TODAS sus filas son válidas. Si una sola fila
+    falla, no se carga nada a SAP.
+    """
+
+    archivo: str                                                 # ruta del Excel validado
+    plantilla: str                                               # ej. "BRP - Creación"
+    errores_plantilla: List[str] = field(default_factory=list)   # V3: estructura
+    advertencias_plantilla: List[str] = field(default_factory=list)
+    filas: List[ResultadoFila] = field(default_factory=list)
+
+    @property
+    def valida(self):
+        return not self.errores_plantilla and all(f.valida for f in self.filas)
+
+    @property
+    def filas_invalidas(self):
+        return [f for f in self.filas if not f.valida]
+
+    def resumen(self):
+        """Una línea legible con el veredicto (para logs y el resumen final)."""
+        if self.errores_plantilla:
+            return "Plantilla inválida: " + "; ".join(self.errores_plantilla)
+        invalidas = self.filas_invalidas
+        if invalidas:
+            return (
+                f"{len(invalidas)} de {len(self.filas)} filas inválidas "
+                f"(filas {', '.join(str(f.fila) for f in invalidas)})"
+            )
+        total = len(self.filas)
+        return f"Plantilla válida ({total} {'fila' if total == 1 else 'filas'})"
 
 
 @dataclass
@@ -61,9 +104,10 @@ class ResultadoCaso:
 
     case_id: str
     exito: bool = False
+    omitido: bool = False                         # saltado a propósito (no es fallo)
     motivo: str = ""                              # por qué falló (si falló)
     paso: str = ""                                # en qué paso quedó
-    archivos_generados: List[ArchivoMacro] = field(default_factory=list)
+    validacion: Optional[ResultadoValidacion] = None
 
 
 @dataclass
@@ -73,4 +117,5 @@ class ResumenLote:
     total: int = 0
     exitosos: int = 0
     fallidos: int = 0
+    omitidos: int = 0
     resultados: List[ResultadoCaso] = field(default_factory=list)

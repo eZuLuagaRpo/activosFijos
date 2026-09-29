@@ -11,6 +11,10 @@ __pycache__/
 # Salidas de runtime del bot
 downloads/*
 !downloads/.gitkeep
+downloads_test/*
+!downloads_test/.gitkeep
+carga_sap/*
+!carga_sap/.gitkeep
 salidas/*
 !salidas/.gitkeep
 logs/*

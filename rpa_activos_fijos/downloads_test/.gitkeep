@@ -1,0 +1,3 @@
+# MODO PRUEBAS (reemplazo): deja aquí el Excel en el formato NUEVO, nombrado
+# EXACTAMENTE con el número de la solicitud. Ej: PDA-7889.xlsx
+# Solo se usa si MODO_PRUEBAS_REEMPLAZO = True en config.py. Ver ESTADO_PROYECTO.md.

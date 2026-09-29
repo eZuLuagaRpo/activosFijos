@@ -2,7 +2,7 @@
 orquestador.py — Coordina los 3 flujos por cada caso y arma el resumen final.
 
 Secuencia por cada solicitud detectada en la bandeja:
-    Flujo 1 (obtener datos)  ->  Flujo 2 (transformar)  ->  Flujo 3 (STUB SAP)
+    Flujo 1 (obtener datos)  ->  Flujo 2 (validar plantilla)  ->  Flujo 3 (STUB SAP)
 
 Principios de resiliencia aplicados aquí:
   - AISLAMIENTO POR CASO: cada caso va dentro de su propio try/except. Si uno
@@ -15,11 +15,14 @@ La función principal `ejecutar` recibe las credenciales y una `cola` opcional
 para enviar los logs a la consola de la UI.
 """
 
+import os
+
 from appian.appian_client import AppianClient
-from core.exceptions import RPAError
+from config import DOWNLOAD_TEST_DIR, MODO_PRUEBAS_REEMPLAZO
+from core.exceptions import CasoOmitidoError, PlantillaInvalidaError, RPAError
 from core.logger import crear_logger
 from core.models import ResultadoCaso, ResumenLote
-from flujos import flujo1_appian, flujo2_procesar, flujo3_sap
+from flujos import flujo1_appian, flujo2_validar, flujo3_sap
 
 
 def _procesar_un_caso(client, caso, logger):
@@ -36,20 +39,33 @@ def _procesar_un_caso(client, caso, logger):
         resultado.paso = "Flujo 1 (Appian)"
         solicitud = flujo1_appian.obtener_solicitud(client, caso, logger=logger)
 
-        # --- Flujo 2: transformar al formato macro ---
-        resultado.paso = "Flujo 2 (Transformación)"
-        archivos = flujo2_procesar.procesar_solicitud(solicitud, logger=logger)
-        resultado.archivos_generados = archivos
+        # --- Flujo 2: validar la plantilla (el mismo Excel va a SAP) ---
+        resultado.paso = "Flujo 2 (Validación)"
+        resultado.validacion = flujo2_validar.validar_solicitud(
+            solicitud, logger=logger
+        )
 
         # --- Flujo 3: carga a SAP (STUB, pendiente) ---
         resultado.paso = "Flujo 3 (SAP - pendiente)"
-        for archivo in archivos:
-            flujo3_sap.cargar_a_sap(archivo, logger=logger)
+        flujo3_sap.cargar_a_sap(solicitud, logger=logger)
 
         resultado.exito = True
         resultado.paso = "Completado"
         logger.info("Caso %s procesado correctamente.", case_id)
 
+    except CasoOmitidoError as e:
+        # Saltado a propósito (ej. MODO PRUEBAS sin archivo): no es un fallo.
+        resultado.omitido = True
+        resultado.motivo = str(e)
+        logger.info("Caso %s OMITIDO: %s", case_id, e)
+    except PlantillaInvalidaError as e:
+        # Plantilla con errores de negocio: el detalle por fila ya quedó en el
+        # log (Flujo 2). PENDIENTE (confirmar con el usuario funcional): si se
+        # le devuelven al usuario las observaciones por fila en Appian.
+        resultado.exito = False
+        resultado.validacion = e.resultado
+        resultado.motivo = str(e)
+        logger.error("Caso %s FALLÓ en %s: %s", case_id, resultado.paso, e)
     except RPAError as e:
         # Errores esperados y clasificados del bot: mensaje claro, sin traza cruda.
         resultado.exito = False
@@ -87,6 +103,8 @@ def ejecutar(user, password, cola=None, logger=None):
 
     try:
         logger.info("=== Inicio de ejecución del RPA de Activos Fijos ===")
+        if MODO_PRUEBAS_REEMPLAZO:
+            _avisar_modo_pruebas(logger)
 
         # 1) Abrir Appian + login (si falla, abortamos con elegancia).
         client = AppianClient(logger=logger)
@@ -102,7 +120,9 @@ def ejecutar(user, password, cola=None, logger=None):
         for caso in casos:
             resultado = _procesar_un_caso(client, caso, logger)
             resumen.resultados.append(resultado)
-            if resultado.exito:
+            if resultado.omitido:
+                resumen.omitidos += 1
+            elif resultado.exito:
                 resumen.exitosos += 1
             else:
                 resumen.fallidos += 1
@@ -121,17 +141,35 @@ def ejecutar(user, password, cola=None, logger=None):
     return resumen
 
 
+def _avisar_modo_pruebas(logger):
+    """Aviso bien visible: el Excel de Appian se reemplaza por el de pruebas."""
+    archivos = sorted(
+        f for f in os.listdir(DOWNLOAD_TEST_DIR) if not f.startswith((".", "~$"))
+    )
+    logger.warning("#" * 70)
+    logger.warning("#  MODO PRUEBAS ACTIVO (MODO_PRUEBAS_REEMPLAZO = True en config.py)")
+    logger.warning("#  Se usarán los Excel de downloads_test en vez de los adjuntos de")
+    logger.warning("#  Appian. Solicitudes sin archivo allí se OMITEN.")
+    logger.warning("#  Archivos de prueba encontrados (%s): %s",
+                   len(archivos), ", ".join(archivos) or "NINGUNO")
+    logger.warning("#" * 70)
+
+
 def _emitir_resumen(resumen, logger):
     """Escribe en el log el resumen final del lote."""
     logger.info("=== Resumen de la ejecución ===")
+    if MODO_PRUEBAS_REEMPLAZO:
+        logger.warning("(Ejecución en MODO PRUEBAS: Excel reemplazados por los de downloads_test)")
     logger.info("Total de casos:   %s", resumen.total)
     logger.info("Procesados OK:    %s", resumen.exitosos)
     logger.info("Fallidos:         %s", resumen.fallidos)
+    if resumen.omitidos:
+        logger.info("Omitidos:         %s", resumen.omitidos)
 
     if resumen.fallidos:
         logger.info("Detalle de casos fallidos:")
         for r in resumen.resultados:
-            if not r.exito:
+            if not r.exito and not r.omitido:
                 logger.info("  - %s | %s | %s", r.case_id, r.paso, r.motivo)
 
     logger.info("=== Fin de la ejecución ===")

@@ -15,9 +15,26 @@ Automatiza la **parametrización de activos fijos** en Bancolombia. Ejecuta
 1. **Flujo 1 — Appian:** entra a Appian, lee la **Bandeja de Actividades**,
    identifica las solicitudes pendientes y, por cada una, abre el caso, lee su
    **tipo de activo** y **acción**, y **descarga el Excel adjunto**.
-2. **Flujo 2 — Procesamiento:** toma ese Excel y lo transforma al **formato de la
-   macro** que luego se carga a SAP (creación / modificación / eliminación).
-3. **Flujo 3 — SAP:** carga el archivo a SAP. **Todavía NO implementado** (stub).
+2. **Flujo 2 — Validación:** el Excel que adjunta el usuario **ya es el formato
+   que se carga a SAP** (cambio de negocio 2026-09-27: ya no se transforma).
+   Este flujo es el **filtro de calidad**: valida la plantilla fila por fila con
+   las reglas de cada (tipo de activo, acción). Regla **todo o nada**: si una
+   fila es inválida, no se carga nada.
+3. **Flujo 3 — SAP:** carga ese mismo Excel a SAP. **Todavía NO implementado** (stub).
+4. **(Futuro) Respuesta en Appian:** en la misma solicitud, comentario
+   parametrizado + el mismo Excel con una columna nueva ("Código SAP" o el
+   error de SAP por fila), y cierre Finalizado Exitoso / No Exitoso.
+
+**Diseño acordado de ejecución (2026-09-27, pendiente de implementar):**
+(1) Preparación: leer bandeja → descargar TODOS → validar TODOS; (2) uno por
+uno (válidos, por vencimiento): SAP → columna de resultado → responder en
+Appian. La llave de todo es el `case_id`; se guardará un registro de estado
+por caso en disco (`descargado → validado/invalido → cargado_sap →
+respondido`) para reanudar sin crear activos duplicados en SAP.
+
+**Método de trabajo:** activo por activo y acción por acción. Hecho: **BRP –
+Creación (carga masiva)**. Las plantillas oficiales y el Word de proceso de
+cada activo viven en `plantillas/<ACTIVO>/` (raíz del repo).
 
 La usuaria final (no técnica) abre un **.exe** con interfaz gráfica, escribe sus
 credenciales de Appian, presiona **Ejecutar** y ve el avance en una consola en vivo.
@@ -34,9 +51,11 @@ credenciales de Appian, presiona **Ejecutar** y ve el avance en una consola en v
 | Wrapper de la librería Appian (valida `success`) | ✅ Hecho |
 | Lector de la Bandeja (`bandeja_reader`) | ✅ Hecho, **con selectores placeholder** |
 | Flujo 1 (bandeja → por caso: abrir + leer + descargar) | ✅ Hecho, **labels placeholder** |
-| Flujo 2 (Excel Appian → macro SAP) | ✅ Hecho, **mapeo de columnas placeholder** |
-| Caso especial Diferido + Creación (2 salidas AS01+AS02) | ✅ Hecho |
+| Flujo 2 (validación de plantilla) — motor común | ✅ Hecho |
+| Validación BRP – Creación (V1–V5, todo o nada) | ✅ Hecho + pruebas (`tests/`) |
+| Validación resto de activos/acciones | 🔲 Se van agregando uno a uno |
 | Flujo 3 (SAP) | 🔲 Stub (pendiente a propósito) |
+| Respuesta en Appian + registro de estado por caso | 🔲 Pendiente |
 | Orquestador + resumen final | ✅ Hecho |
 | Empaquetado `.exe` (`build.bat`) | ✅ Hecho (falta probarlo en un PC sin Python) |
 
@@ -49,8 +68,11 @@ mapeo de columnas. Todo eso está explicado en
 
 ## 3. Arquitectura y módulos
 
+> ⚠️ Desde el 2026-09-27 el paquete `transformacion/` ya no existe: lo
+> reemplazó `validacion/` (ver Changelog). El árbol de abajo lo refleja.
+
 La regla de oro es la **separación de responsabilidades**:
-**UI ↔ lógica (flujos) ↔ Appian ↔ transformación**. Y **se reutiliza** la
+**UI ↔ lógica (flujos) ↔ Appian ↔ validación**. Y **se reutiliza** la
 librería `an0016001_appian_flow` (login, navegación, descarga, formularios).
 
 ```
@@ -81,27 +103,30 @@ rpa_activos_fijos/
 │   └── bandeja_reader.py       # NUEVO: lee la Bandeja de Actividades (selectores placeholder + respaldo)
 │
 ├── flujos/
-│   ├── flujo1_appian.py        # login → bandeja → por caso: search_case + get_case_data
-│   ├── flujo2_procesar.py      # Excel Appian → formato macro SAP (usa el router)
+│   ├── flujo1_appian.py        # login → bandeja → por caso: navegar directo + get_case_data
+│   ├── flujo2_validar.py       # Valida la plantilla (usa validacion/router); todo o nada
 │   └── flujo3_sap.py           # STUB: carga a SAP pendiente
 │
-├── transformacion/
-│   ├── router.py               # (tipo, acción) → handler
-│   ├── base_handler.py         # Interfaz común: leer Excel, guardar macro
-│   ├── handlers/
-│   │   ├── generico_handler.py # Patrón base: 1 entrada → 1 salida
-│   │   └── diferidos_handler.py# Caso especial: Diferido + Creación → 2 salidas (AS01 + AS02)
-│   └── mapping/
-│       └── mapeo.py            # PLACEHOLDER del mapeo de columnas + plantillas de macro
+├── validacion/
+│   ├── router.py               # (tipo, acción) → validador. Sin validador = el caso no se procesa
+│   ├── base_validador.py       # Motor común: 1ª hoja, columnas por ENCABEZADO, V1 obligatorios,
+│   │                           #   V3 estructura, largos máximos (advertencia), filas vacías
+│   └── plantillas/
+│       └── brp_creacion.py     # BRP – Creación: columnas A..AB + V2 (cantidad=1) + V4 (vehículos)
+│
+├── tests/                      # pytest: `python -m pytest tests -q` (usa plantillas/ de la raíz)
 │
 ├── orquestador.py              # Corre Flujo1 → Flujo2 → Flujo3(stub) por cada caso + resumen
 ├── downloads/                  # Excel descargados de Appian (runtime)
+├── downloads_test/             # MODO PRUEBAS: Excel preparados a mano (PDA-7889.xlsm)
+├── carga_sap/                  # Copia temporal con el nombre exacto de SAP ("CREAR (BRP).xlsm")
 ├── salidas/                    # Excel ya en formato macro (runtime)
 ├── logs/                       # Un log por ejecución (con timestamp)
 └── docs/
     ├── ESTADO_PROYECTO.md         # este archivo
     ├── CONFIGURACION_MANUAL.md    # lo que hay que conseguir/configurar a mano
-    └── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
+    ├── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
+    └── GUIA_MODO_PRUEBAS.md       # paso a paso para probar con MODO_PRUEBAS_REEMPLAZO
 ```
 
 ### Cómo fluyen los datos (resumen)
@@ -112,9 +137,9 @@ flowchart TD
     ORQ --> C[AppianClient.start login]
     C --> B[bandeja_reader.listar_pendientes]
     B -->|lista de case_id| LOOP{por cada caso}
-    LOOP --> F1[Flujo 1: search_case + get_case_data + descargar Excel]
-    F1 -->|Solicitud| F2[Flujo 2: router -> handler -> macro Excel]
-    F2 -->|ArchivoMacro| F3[Flujo 3: cargar_a_sap STUB]
+    LOOP --> F1[Flujo 1: navegar directo + get_case_data + descargar Excel]
+    F1 -->|Solicitud| F2[Flujo 2: router -> validador -> todo o nada]
+    F2 -->|plantilla válida| F3[Flujo 3: cargar_a_sap STUB]
     F3 --> LOOP
     LOOP -->|fin| R[Resumen: total / OK / fallidos]
 ```
@@ -186,16 +211,121 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
    → Están como placeholder en `LABELS_TIPO_ACTIVO` / `LABELS_ACCION`.
 3. **Los selectores XPath** de la bandeja (fila, ID, filtro). → Placeholder en
    `BANDEJA_XPATH_*`.
-4. **El mapeo de columnas** Appian → macro SAP por cada (tipo, acción).
-   → Placeholder en `transformacion/mapping/mapeo.py`.
-5. **El código real de la acción "eliminación"** (se asumió `ELIM`).
+4. ~~El mapeo de columnas~~ → ya no aplica (el Excel del usuario va directo a SAP).
+5. ~~El código real de la acción "eliminación"~~ → ya no aplica (era de las macros).
 6. **El navegador** de la usuaria (se asume Edge).
+7. **Plantilla inválida: ¿se le devuelven al usuario las observaciones por
+   fila?** Lo confirma el usuario funcional. Mientras tanto el caso queda
+   FALLIDO con el detalle por fila en el log.
 
 ---
 
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-09-28 — Nombre exacto del archivo para SAP + BRP Creación solo .xlsm.**
+  - Confirmado con la usuaria funcional: en la carga masiva SAP exige que la
+    plantilla se llame EXACTAMENTE `CREAR (BRP).xlsm` (BRP – Creación). En
+    SAP el archivo se escoge con el explorador (no hay carpeta fija).
+  - Diseño: los Excel se siguen descargando como `CASE_ID_tipo_accion.xlsm`
+    (así se sabe de qué solicitud es cada uno). Justo antes de SAP,
+    `flujo3_sap.preparar_archivo_sap()` hace una COPIA temporal con el
+    nombre exacto en la nueva carpeta `carga_sap/`. Como SAP procesa una
+    solicitud a la vez, la copia se reemplaza en cada caso; los resultados
+    se anotarán en el archivo de la solicitud, no en la copia. Por
+    seguridad, ANTES de copiar se borra la copia anterior: si algo falla,
+    nunca queda listo el archivo de OTRA solicitud.
+  - `config.py`: `CARGA_SAP_DIR` y `NOMBRE_ARCHIVO_SAP = {(brp, creacion):
+    "CREAR (BRP).xlsm"}` (los demás activos se agregan ahí).
+  - Validación: cada plantilla define sus `extensiones`; BRP – Creación
+    solo acepta `.xlsm` (un .xlsx no se convierte solo renombrándolo).
+  - Nuevos: `SapError`, `Solicitud.archivo_sap`, `carga_sap/` en
+    `.gitignore`. `cargar_a_sap()` prepara el archivo y sigue siendo stub
+    para la carga en sí.
+  - Pruebas: `tests/test_flujo3_archivo_sap.py` (4) + ajuste de la de .xlsx
+    → 41 OK. Simulación de punta a punta OK (PDA-9003 con .xlsx rechazado).
+  - A futuro (al implementar SAP): borrar la copia de `carga_sap/` apenas
+    SAP termine de cargarla.
+  - Regla confirmada: la clasificación obligatorio/condicional/informativo
+    de cada plantilla sale del **Word de proceso** (por nombre de campo), no
+    del texto "OBLIGATORIO" de los encabezados del Excel. BRP – Creación ya
+    cumplía; se documentó en `validacion/plantillas/brp_creacion.py`.
+  - Nueva guía [GUIA_MODO_PRUEBAS.md](GUIA_MODO_PRUEBAS.md): paso a paso
+    para probar con el modo pruebas. **Actualizarla** cuando se construyan
+    SAP y la respuesta en Appian.
+
+- **2026-09-27 (2) — MODO PRUEBAS por reemplazo del Excel (TEMPORAL).**
+  - Motivo: hoy los usuarios aún adjuntan en Appian el formato VIEJO, con el
+    que la validación siempre falla. Para probar en el PC corporativo con
+    solicitudes REALES se reemplaza el Excel por uno preparado a mano.
+  - Switch en `config.py`: `MODO_PRUEBAS_REEMPLAZO = False` (por defecto =
+    flujo real, sin ningún cambio de comportamiento). Con `True`:
+    1. Appian es real (bandeja, solicitud, tipo/acción de "Detalles",
+       descarga del adjunto).
+    2. Solo se trabajan solicitudes con archivo en `downloads_test/`
+       nombrado EXACTAMENTE con el número de la solicitud
+       (`PDA-7889.xlsx` o `.xlsm`; no distingue mayúsculas; ignora `~$…`).
+       Las demás se **omiten** sin abrirlas (`CasoOmitidoError`; cuentan en
+       "Omitidos", no en "Fallidos"). Dos archivos para la misma solicitud
+       → error, no se adivina.
+    3. El Excel que sigue el flujo es una COPIA en `downloads/`:
+       `PDA-7889_brp_creacion_PRUEBA.xlsx`. El archivo de `downloads_test`
+       nunca se modifica y el adjunto real de Appian se conserva.
+    4. Aviso grande en la consola al iniciar y en el resumen final.
+  - Ojo: con el modo activo, si el adjunto REAL de Appian falla (no hay, o
+    hay 2), el caso falla igual que en producción (no se enmascara).
+  - Código: `flujo1_appian._buscar_archivo_prueba` / `_usar_archivo_prueba`
+    (+ 2 enganches en `obtener_solicitud`), `orquestador._avisar_modo_pruebas`
+    y conteo de omitidos. `downloads_test/*` en `.gitignore`.
+  - Pruebas: `tests/test_modo_pruebas_reemplazo.py` (7) → total 37 OK. En
+    `tests/conftest.py` la librería de Appian se reemplaza por un módulo
+    vacío SOLO si no está instalada (fuera del venv corporativo).
+  - **Cuando los usuarios ya adjunten el formato nuevo**: dejar el switch en
+    False o eliminar el modo (todo está marcado con "MODO PRUEBAS").
+
+- **2026-09-27 — Cambio de negocio: el Excel del usuario YA ES el formato de
+  SAP. Flujo 2 pasa de "transformar" a "validar". Validación BRP – Creación.**
+  - Decisión de negocio: el usuario adjunta en Appian la plantilla que se
+    carga tal cual a SAP; al final se le devuelve ese mismo Excel con una
+    columna más (código SAP o error por fila). Por eso se **eliminó
+    `transformacion/`** (router, handlers, `mapeo.py`, caso especial de
+    Diferidos AS01+AS02), `ArchivoMacro`, `TransformacionError`,
+    `CODIGO_MACRO_POR_ACCION` y `MAPPING_DIR`, y su `--add-data` en `build.bat`.
+  - Nuevo paquete `validacion/`: `base_validador.py` (motor común) +
+    `plantillas/brp_creacion.py` + `router.py`. Las columnas se ubican por
+    **encabezado** normalizado (sin tildes, puntuación, saltos de línea ni
+    espacios sobrantes; la plantilla real trae `"ESTADO.\n OBLIGATORIO"`,
+    `"CENTRO "`, `" NUMERO DE CONTRATO"`); si están corridas, se valida igual
+    y se deja advertencia.
+  - Reglas BRP – Creación (carga masiva, cada fila = un activo): V1
+    obligatorios A,B,C,D,F,H,O,W (vacío = nada, espacios o 0); V2 C = 1; V3
+    encabezados + ≥1 fila; V4 si hay matrícula (M) el modelo (U) es
+    obligatorio; V5 T ≤ 30 y U ≤ 15 caracteres (solo advertencia); los
+    informativos no se validan. **Todo o nada.** Formatos aceptados: .xlsx y
+    .xlsm. Se usó la lista de obligatorios que coincide con la plantilla (la
+    del Word de proceso tenía letras erradas, confirmado por el usuario).
+  - `flujos/flujo2_procesar.py` → `flujos/flujo2_validar.py`
+    (`validar_solicitud`): deja en el log cada error/advertencia por fila y
+    lanza `PlantillaInvalidaError` (lleva el `ResultadoValidacion`) si no
+    pasa. Combinación (tipo, acción) sin validador → `ValidacionError`: el
+    caso no se procesa.
+  - `core/models.py`: nuevos `ResultadoFila` y `ResultadoValidacion`;
+    `ResultadoCaso.validacion` reemplaza `archivos_generados`.
+  - `flujo3_sap.cargar_a_sap` ahora recibe la `Solicitud` (stub).
+  - Nuevas pruebas `tests/test_validacion_brp_creacion.py` (30, todas OK)
+    sobre la plantilla oficial `plantillas/BRP/Plantilla Creación Activos BRP.xlsm`.
+  - Doble chequeo (mismo día), 2 fallas corregidas: (a) en modo read_only
+    openpyxl confía en el "rango usado" guardado en el archivo, y la
+    plantilla oficial trae `A1:AB1` → si llega así, NO se veía ninguna fila
+    de datos; se agregó `hoja.reset_dimensions()`. (b) Una nota fuera de
+    A..AB (ej. AD5) creaba una fila "inválida" fantasma; ahora solo cuentan
+    las columnas de la plantilla. Además se simuló el orquestador completo
+    con un Appian falso (Detalles "Activos BRP → Crear", 3 casos): renombre
+    `CASE_ID_brp_creacion.ext`, validación, detalle por fila en el log y
+    resumen final OK.
+  - Pendiente: qué se devuelve al usuario cuando la plantilla es inválida
+    (supuesto 7); registro de estado por caso y orquestación híbrida.
 
 - **2026-08-18 (3) — Nombre normalizado del Excel descargado + manejo de
   múltiples adjuntos.**

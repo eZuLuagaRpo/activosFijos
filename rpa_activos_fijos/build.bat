@@ -29,7 +29,6 @@ pyinstaller ^
   --name "RPA_Activos_Fijos" ^
   --icon "assets\icon.ico" ^
   --add-data "assets;assets" ^
-  --add-data "transformacion\mapping;transformacion\mapping" ^
   --hidden-import customtkinter ^
   --hidden-import PIL ^
   --hidden-import PIL._tkinter_finder ^
@@ -61,5 +60,4 @@ REM ---------------------------------------------------------------------------
 REM pyinstaller --noconfirm --clean --windowed --onefile ^
 REM   --name "RPA_Activos_Fijos" --icon "assets\icon.ico" ^
 REM   --add-data "assets;assets" ^
-REM   --add-data "transformacion\mapping;transformacion\mapping" ^
 REM   --collect-all customtkinter --collect-all an0016001_appian_flow app.py

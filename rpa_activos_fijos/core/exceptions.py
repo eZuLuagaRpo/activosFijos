@@ -37,8 +37,28 @@ class BandejaError(AppianError):
     """No se pudo leer la Bandeja de Actividades (selectores, tabla vacía...)."""
 
 
-class TransformacionError(RPAError):
-    """Fallo al transformar el Excel de Appian al formato de la macro SAP."""
+class CasoOmitidoError(RPAError):
+    """El caso se salta a propósito (no es un fallo). Hoy solo ocurre en
+    MODO_PRUEBAS_REEMPLAZO cuando no hay archivo de prueba para la solicitud."""
+
+
+class ValidacionError(RPAError):
+    """No se pudo validar la plantilla Excel: no hay validación implementada
+    para esa combinación (tipo, acción), o el archivo no se pudo abrir."""
+
+
+class PlantillaInvalidaError(ValidacionError):
+    """La plantilla se validó y NO cumple las reglas (estructura o alguna
+    fila). Lleva el `ResultadoValidacion` completo con el detalle por fila."""
+
+    def __init__(self, mensaje, resultado):
+        super().__init__(mensaje)
+        self.resultado = resultado
+
+
+class SapError(RPAError):
+    """Fallo en el Flujo 3 (SAP): preparar el archivo de carga, la
+    transacción o la lectura del resultado."""
 
 
 class ConfiguracionError(RPAError):

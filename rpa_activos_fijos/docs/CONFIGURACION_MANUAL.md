@@ -214,6 +214,13 @@ solicitudes de activos fijos. **Esto hay que confirmarlo con ella.**
 
 ## 6. Mapeo de columnas Appian → macro SAP
 
+> ⚠️ **OBSOLETO desde el 2026-09-27.** El Excel que adjunta el usuario ya es
+> el formato de SAP: no hay mapeo ni `transformacion/` (se eliminó). Las
+> reglas de cada plantilla viven ahora en `validacion/plantillas/` y las
+> plantillas oficiales en `plantillas/` (raíz del repo). Ver el Changelog de
+> [ESTADO_PROYECTO.md](ESTADO_PROYECTO.md). Se conserva el texto de abajo
+> solo como histórico.
+
 Este es el dato de negocio más importante que **falta**. Es la "tabla de
 traducción" que dice: *la columna X del Excel de Appian va a la columna Y de la
 macro de SAP*, y esto cambia según el **tipo de activo** y la **acción**.

@@ -28,6 +28,7 @@ Reglas clave:
 """
 
 import os
+import shutil
 import time
 
 from selenium.webdriver.common.by import By
@@ -39,11 +40,14 @@ from config import (
     DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO,
     DETALLE_XPATH_SECCION_ACTIVOS,
     DOWNLOAD_DIR,
+    DOWNLOAD_TEST_DIR,
     LABELS_ACTIVOS_DETALLE,
+    MODO_PRUEBAS_REEMPLAZO,
     TIMEOUT_FILES,
 )
 from core.exceptions import (
     AppianError,
+    CasoOmitidoError,
     MultiplesActivosError,
     MultiplesAdjuntosError,
     SinAdjuntosError,
@@ -287,6 +291,59 @@ def _normalizar_nombre_excel(case_id, tipo, accion, excel_path, logger=None):
     return ruta_nueva
 
 
+def _buscar_archivo_prueba(case_id):
+    """
+    MODO PRUEBAS (reemplazo): busca en DOWNLOAD_TEST_DIR el Excel nombrado
+    EXACTAMENTE con el número de la solicitud (ej. "PDA-7889.xlsx"; no
+    distingue mayúsculas). Ignora los temporales de Excel ("~$PDA-7889.xlsx").
+
+    Returns:
+        La ruta del archivo, o None si no hay ninguno para esa solicitud.
+
+    Raises:
+        AppianError: si hay MÁS de uno (ej. PDA-7889.xlsx y PDA-7889.xlsm):
+            no se adivina cuál usar.
+    """
+    candidatos = [
+        nombre
+        for nombre in os.listdir(DOWNLOAD_TEST_DIR)
+        if os.path.splitext(nombre)[0].strip().upper() == case_id.upper()
+        and os.path.splitext(nombre)[1].lower() in (".xlsx", ".xlsm", ".xls")
+    ]
+    if len(candidatos) > 1:
+        raise AppianError(
+            f"MODO PRUEBAS: hay {len(candidatos)} archivos de prueba para "
+            f"{case_id} en downloads_test ({', '.join(candidatos)}). Deja solo uno."
+        )
+    return os.path.join(DOWNLOAD_TEST_DIR, candidatos[0]) if candidatos else None
+
+
+def _usar_archivo_prueba(case_id, tipo, accion, archivo_prueba, excel_appian, logger=None):
+    """
+    MODO PRUEBAS (reemplazo): en vez del Excel adjunto en Appian, se usa una
+    COPIA del archivo de prueba, guardada en DOWNLOAD_DIR como
+    CASE_ID_tipo_accion_PRUEBA.ext. Así:
+      - el archivo original de downloads_test nunca se modifica, y
+      - el adjunto real descargado de Appian se conserva sin tocar.
+    """
+    _, extension = os.path.splitext(archivo_prueba)
+    partes = [case_id, tipo, accion, "PRUEBA"]
+    nombre = "_".join(p for p in partes if p) + extension
+    destino = os.path.join(DOWNLOAD_DIR, nombre)
+    shutil.copy2(archivo_prueba, destino)
+
+    if logger:
+        logger.warning(
+            "MODO PRUEBAS | Caso %s: se REEMPLAZA el adjunto de Appian (%s) "
+            "por el archivo de prueba %s -> copia de trabajo %s",
+            case_id,
+            os.path.basename(excel_appian) if excel_appian else "?",
+            os.path.basename(archivo_prueba),
+            nombre,
+        )
+    return destino
+
+
 def obtener_solicitud(client, caso, logger=None):
     """
     Procesa UN caso (un `CasoBandeja`, ya con su URL de la bandeja): navega
@@ -299,6 +356,17 @@ def obtener_solicitud(client, caso, logger=None):
     """
     case_id = caso.case_id
     fecha_vencimiento = caso.fecha_vencimiento
+
+    # 0) MODO PRUEBAS (reemplazo): solo se trabajan las solicitudes que
+    #    tienen archivo en downloads_test. Las demás ni se abren.
+    archivo_prueba = None
+    if MODO_PRUEBAS_REEMPLAZO:
+        archivo_prueba = _buscar_archivo_prueba(case_id)
+        if archivo_prueba is None:
+            raise CasoOmitidoError(
+                f"MODO PRUEBAS: no hay archivo {case_id}.xlsx/.xlsm en "
+                "downloads_test; la solicitud se omite."
+            )
 
     # 1) Abrir el caso navegando directo a su URL (con reintentos).
     ejecutar_con_reintentos(
@@ -340,6 +408,13 @@ def obtener_solicitud(client, caso, logger=None):
     excel_path = _normalizar_nombre_excel(
         case_id, tipo, accion, excel_path, logger=logger
     )
+
+    # 6) MODO PRUEBAS (reemplazo): el Excel que sigue el flujo es la copia
+    #    del archivo de prueba, no el adjunto de Appian.
+    if archivo_prueba:
+        excel_path = _usar_archivo_prueba(
+            case_id, tipo, accion, archivo_prueba, excel_path, logger=logger
+        )
 
     solicitud = Solicitud(
         case_id=case_id,
