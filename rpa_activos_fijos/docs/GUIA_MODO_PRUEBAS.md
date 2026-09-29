@@ -5,7 +5,7 @@
 > los usuarios sigan adjuntando el formato viejo.
 >
 > **Alcance actual:** solo **Activos BRP – Creación** (carga masiva).
-> Última actualización: 2026-09-28.
+> Última actualización: 2026-09-29 (SAP etapa 1: entra y se detiene antes de Ejecutar).
 
 ---
 
@@ -39,15 +39,27 @@ nuevo.
 - Lee la bandeja, abre la solicitud, identifica activo y acción.
 - Valida tu Excel con las reglas de BRP – Creación.
 - Deja listo el archivo `carga_sap/CREAR (BRP).xlsm` para SAP.
+- **Entra a SAP** en una pestaña nueva del mismo navegador (mismas
+  credenciales de Appian), abre `Z_AM_MASIVA`, escoge "crear masivo", pega
+  la ruta de `CREAR (BRP).xlsm` y hace clic en "Ejecución de test".
+- **Se DETIENE ahí** y deja la pantalla de SAP quieta
+  `SAP_PAUSA_REVISION_SEG` segundos (120 por defecto) para que la revises.
+  Luego vuelve a Appian y sigue con la siguiente solicitud.
 
-**Todavía NO hace (está en construcción):**
-- **No entra a SAP** ni carga nada: solo deja el archivo listo.
-- **No responde ni cierra** solicitudes en Appian.
+**NO hace (a propósito):**
+- **No hace clic en "Ejecutar" en SAP** (`SAP_EJECUTAR_REAL = False`): no
+  se crea ningún activo.
+- **No responde ni cierra** solicitudes en Appian
+  (`APPIAN_RESPONDER_REAL = False`; además esa parte aún no está construida).
 
 Es decir: **hoy puedes correr el modo pruebas sin riesgo** de crear activos
-ni de notificar a usuarios. Cuando se construya SAP y la respuesta en Appian,
-cada una quedará detrás de su propio interruptor apagado, y esta guía se
-actualizará.
+ni de notificar a usuarios. Los dos interruptores de seguridad están en
+`config.py` y **no se deben cambiar** hasta que se decida explícitamente.
+
+> 👀 **En la pausa de revisión confirma en SAP:** que está en `Z_AM_MASIVA`,
+> que quedó marcada la opción de **crear masivo**, que la **ruta** del
+> archivo es la de `carga_sap\CREAR (BRP).xlsm` y cómo quedó **"Ejecución de
+> test"** (según la usuaria funcional, un clic la deja deshabilitada).
 
 ---
 
@@ -172,9 +184,18 @@ WARNING | MODO PRUEBAS | Caso PDA-7889: se REEMPLAZA el adjunto de Appian (PDA-7
 INFO    | Validando 'PDA-7889_brp_creacion_PRUEBA.xlsm' (hoja 'FORMATO') contra la plantilla BRP - Creación.
 INFO    | Caso PDA-7889 | Flujo 2: Plantilla válida (2 filas)
 INFO    | Caso PDA-7889: archivo para SAP preparado -> ...\carga_sap\CREAR (BRP).xlsm (copia de PDA-7889_brp_creacion_PRUEBA.xlsm)
-WARNING | PENDIENTE: carga a SAP no implementada. Archivo listo para cargar: ...\carga_sap\CREAR (BRP).xlsm
-INFO    | Caso PDA-7889 procesado correctamente.
+INFO    | Abriendo SAP en una pestaña nueva: https://sap-erp.apps.bancolombia.corp/...
+INFO    | SAP: iniciando sesión con el usuario '...'.        (o "SAP: sesión ya activa.")
+INFO    | SAP: sesión iniciada.
+INFO    | SAP: abriendo transacción Z_AM_MASIVA.
+INFO    | SAP: ruta del archivo -> ...\carga_sap\CREAR (BRP).xlsm
+WARNING | Caso PDA-7889: SAP listo para EJECUTAR, pero SAP_EJECUTAR_REAL = False: el bot se DETIENE aquí (no hace clic en Ejecutar). Pantalla disponible para revisión por 120 s.
+INFO    | Caso PDA-7889 procesado correctamente (Detenido antes de Ejecutar en SAP (SAP_EJECUTAR_REAL = False)).
 ```
+
+> SAP se abre **una sola vez** (con la primera solicitud válida); las
+> siguientes reutilizan la misma pestaña. Si ninguna solicitud es válida,
+> SAP ni se abre.
 
 Y las que no tienen archivo:
 
@@ -193,7 +214,8 @@ INFO    | Fallidos:         0
 INFO    | Omitidos:         4
 ```
 
-- **Procesados OK:** tu Excel pasó la validación y quedó listo para SAP.
+- **Procesados OK:** tu Excel pasó la validación y SAP quedó listo para
+  ejecutar (el bot se detuvo antes, a propósito).
 - **Fallidos:** algo salió mal (ver "Detalle de casos fallidos" y la
   sección 5 de esta guía).
 - **Omitidos:** solicitudes de la bandeja sin archivo tuyo. Es normal.
@@ -235,6 +257,7 @@ El mismo contenido queda guardado en `rpa_activos_fijos/logs/ejecucion_AAAAMMDD_
 - [ ] `MODO_PRUEBAS_REEMPLAZO = True` en `config.py`, guardado.
 - [ ] Bot reiniciado (`python app.py`).
 - [ ] `carga_sap/CREAR (BRP).xlsm` **cerrado** en Excel.
+- [ ] `SAP_EJECUTAR_REAL = False` y `APPIAN_RESPONDER_REAL = False` (no tocar).
 - [ ] Al terminar: `MODO_PRUEBAS_REEMPLAZO = False`.
 
 ---
@@ -256,6 +279,10 @@ El mismo contenido queda guardado en `rpa_activos_fijos/logs/ejecucion_AAAAMMDD_
 | `no se pudo borrar la copia anterior 'CREAR (BRP).xlsm' (¿está abierta...?)` | Tienes abierto ese archivo | Cerrarlo en Excel/SAP y ejecutar de nuevo |
 | `El caso ... no trae adjuntos` / `trae 2 Excel adjuntos` | Problema con el adjunto **real** de Appian | En modo pruebas el adjunto real se descarga igual (a propósito, para no ocultar fallas reales). Usa otra solicitud |
 | Advertencia `T (Fabricante) tiene N caracteres (máximo 30)` | Solo aviso, **no** rechaza | Opcional: acortarlo |
+| `SAP: no apareció la pantalla inicial de SAP (barra de transacción o login)` | SAP no cargó, o la pantalla de login usa otros IDs | Revisa que la URL abra a mano. Si pide login, captura los XPath de usuario, clave y botón y ponlos en `SAP_XPATH_LOGIN_*` (hoy son los estándar de SAP, **por confirmar**) |
+| `SAP: no apareció la barra de transacción después del login (¿credenciales?)` | Usuario/clave rechazados, o SAP pidió algo más (ej. cambio de clave) | Entrar a mano a SAP una vez y revisar |
+| `SAP: no apareció la opción 'creacion' masivo de Z_AM_MASIVA ...` (u otro elemento) | La transacción no abrió, o cambió el selector | Revisa en pantalla y actualiza el XPath en `config.py` (sección SAP) |
+| Mientras corre, la pestaña de SAP queda "congelada" 2 minutos | Es la **pausa de revisión** a propósito | Puedes bajarla en `SAP_PAUSA_REVISION_SEG` |
 
 ---
 
@@ -268,7 +295,8 @@ El mismo contenido queda guardado en `rpa_activos_fijos/logs/ejecucion_AAAAMMDD_
   abrir la solicitud) y `_usar_archivo_prueba()` (después de descargar y
   renombrar el adjunto real). `orquestador.py` → `_avisar_modo_pruebas()` y
   conteo de omitidos (`CasoOmitidoError`). `flujos/flujo3_sap.py` →
-  `preparar_archivo_sap()`.
+  `preparar_archivo_sap()` y `cargar_a_sap()` (etapa 1). `sap/sap_webgui.py`
+  → pestaña, login, transacción, clics/escritura (con iframes y respaldos).
 - Con el switch en `False` el comportamiento es exactamente el del flujo
   real (hay una prueba automática que lo verifica aunque existan archivos en
   `downloads_test/`).

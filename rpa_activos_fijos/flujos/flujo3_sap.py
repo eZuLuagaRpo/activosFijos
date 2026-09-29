@@ -1,23 +1,39 @@
 """
-flujos/flujo3_sap.py — FLUJO 3: carga a SAP (EN CONSTRUCCIÓN).
+flujos/flujo3_sap.py — FLUJO 3: carga a SAP.
 
 Qué se carga: el MISMO Excel que adjuntó el usuario (ya validado en el Flujo
 2); no hay transformación a otro formato. Pero SAP exige que el archivo se
 llame EXACTAMENTE de una forma según (tipo, acción) — ej. "CREAR (BRP).xlsm"
 — ver NOMBRE_ARCHIVO_SAP en config.py.
 
-Hecho:
-  - preparar_archivo_sap(): copia temporal con el nombre exacto de SAP.
-Pendiente (activo por activo, cuando negocio entregue las etiquetas):
-  - Abrir SAP, transacción, cargar el archivo preparado, leer el resultado.
-  - El clic en "Ejecutar" se programa DE ÚLTIMO y detrás de un interruptor
-    apagado (no hay SAP de pruebas: ejecutar crea activos reales).
+Etapas (se construye por partes, supervisado — no hay SAP de pruebas):
+  ✅ Etapa 1: preparar el archivo -> abrir la transacción -> escoger la
+     opción de la acción -> pegar la ruta -> cambiar "Ejecución de test" ->
+     DETENERSE (SAP_EJECUTAR_REAL = False) y dejar la pantalla quieta
+     SAP_PAUSA_REVISION_SEG segundos para revisarla.
+  🔲 Etapa 2: clic en "Ejecutar" (se programa DE ÚLTIMO, cuando el usuario
+     lo pida) y lectura del cuadro de resultados.
+
+Hoy solo está configurado BRP – Creación (Z_AM_MASIVA). Lo que no esté en
+SAP_TRANSACCION_POR_CASO no se envía a SAP.
 """
 
 import os
 import shutil
+import time
 
-from config import CARGA_SAP_DIR, NOMBRE_ARCHIVO_SAP
+from config import (
+    CARGA_SAP_DIR,
+    NOMBRE_ARCHIVO_SAP,
+    SAP_EJECUTAR_REAL,
+    SAP_MASIVA_XPATH_CAMPO_RUTA,
+    SAP_MASIVA_XPATH_EJECUCION_TEST,
+    SAP_MASIVA_XPATH_OPCION_ACCION,
+    SAP_PAUSA_REVISION_SEG,
+    SAP_TRANSACCION_POR_CASO,
+    SAP_TX_MASIVA,
+    SAP_XPATH_BOTON_EJECUTAR,
+)
 from core.exceptions import SapError
 
 
@@ -77,23 +93,60 @@ def preparar_archivo_sap(solicitud, logger=None):
     return destino
 
 
-def cargar_a_sap(solicitud, logger=None):
+def cargar_a_sap(sap, solicitud, logger=None):
     """
-    Prepara el archivo con el nombre exacto de SAP. La carga en SAP en sí
-    sigue PENDIENTE (stub): solo se registra en el log.
+    Lleva la plantilla validada a SAP hasta JUSTO ANTES de "Ejecutar".
 
     Args:
+        sap (SapWebGui): sesión de SAP (se abre aquí la primera vez).
         solicitud (Solicitud): caso con su plantilla ya validada.
         logger: logger opcional.
+
+    Returns:
+        str: texto del paso en el que quedó (para el resumen del caso).
+
+    Raises:
+        SapError: si la combinación no está configurada o algo falla en SAP.
     """
+    case_id = solicitud.case_id
+    transaccion = SAP_TRANSACCION_POR_CASO.get((solicitud.tipo, solicitud.accion))
+    if transaccion != SAP_TX_MASIVA:
+        raise SapError(
+            f"Caso {case_id}: (tipo={solicitud.tipo!r}, accion={solicitud.accion!r}) "
+            "no tiene transacción de SAP configurada. Revisa "
+            "SAP_TRANSACCION_POR_CASO en config.py."
+        )
+
     ruta = preparar_archivo_sap(solicitud, logger=logger)
 
-    mensaje = (
-        f"PENDIENTE: carga a SAP no implementada. Archivo listo para cargar: "
-        f"{ruta}"
+    sap.asegurar_sesion()
+    sap.ir_a_transaccion(transaccion)
+    sap.clic(
+        SAP_MASIVA_XPATH_OPCION_ACCION[solicitud.accion],
+        f"la opción '{solicitud.accion}' masivo de {transaccion}",
     )
-    if logger:
-        logger.warning(mensaje)
-    else:
-        print(mensaje)
-    return None
+    sap.escribir(SAP_MASIVA_XPATH_CAMPO_RUTA, ruta, "ruta del archivo")
+    sap.clic(SAP_MASIVA_XPATH_EJECUCION_TEST, "la opción 'Ejecución de test'")
+
+    if not SAP_EJECUTAR_REAL:
+        if logger:
+            logger.warning(
+                "Caso %s: SAP listo para EJECUTAR, pero SAP_EJECUTAR_REAL = False: "
+                "el bot se DETIENE aquí (no hace clic en Ejecutar). Pantalla "
+                "disponible para revisión por %s s.",
+                case_id,
+                SAP_PAUSA_REVISION_SEG,
+            )
+        time.sleep(SAP_PAUSA_REVISION_SEG)
+        return "Detenido antes de Ejecutar en SAP (SAP_EJECUTAR_REAL = False)"
+
+    # Etapa 2 (pendiente): solo se llega aquí si alguien activó el interruptor.
+    if not SAP_XPATH_BOTON_EJECUTAR:
+        raise SapError(
+            "SAP_EJECUTAR_REAL = True pero el botón 'Ejecutar' todavía no está "
+            "configurado (SAP_XPATH_BOTON_EJECUTAR). No se ejecutó nada."
+        )
+    raise SapError(
+        "La ejecución en SAP y la lectura de resultados aún no están "
+        "implementadas. No se ejecutó nada."
+    )

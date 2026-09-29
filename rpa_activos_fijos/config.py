@@ -211,6 +211,129 @@ NOMBRE_ARCHIVO_SAP = {
 
 
 # ---------------------------------------------------------------------------
+# SAP — TRANSACCIONES Y SELECTORES (capturados en SAP real, 2026-09-28)
+# ---------------------------------------------------------------------------
+# SAP se usa en el NAVEGADOR (SAP GUI for HTML): se maneja con Selenium, igual
+# que Appian. Cada selector es una LISTA (principal -> respaldos), como en la
+# bandeja: si algún día cambia, se agrega una alternativa aquí sin tocar código.
+
+# SAP GUI for HTML (webgui), mandante 900. Se abre en una PESTAÑA NUEVA del
+# mismo navegador de Appian. Inicio de sesión con las MISMAS credenciales de
+# Appian (confirmado 2026-09-28).
+SAP_URL = "https://sap-erp.apps.bancolombia.corp/sap/bc/gui/sap/its/webgui?sap-client=900#"
+
+# Pantalla de inicio de sesión. ⚠️ POR CONFIRMAR: son los IDs ESTÁNDAR de la
+# pantalla de login de SAP (no se capturaron en el ambiente real). Si la
+# sesión entra sola (SSO), el bot no los necesita: detecta que ya está la
+# barra de transacción y sigue.
+SAP_XPATH_LOGIN_USUARIO = ['//*[@id="sap-user"]']
+SAP_XPATH_LOGIN_CLAVE = ['//*[@id="sap-password"]']
+SAP_XPATH_LOGIN_BOTON = ['//*[@id="LOGON_BUTTON"]']
+
+# Barra donde se escribe el código de la transacción.
+SAP_XPATH_BARRA_TRANSACCION = [
+    '//*[@id="ToolbarOkCode"]',
+]
+
+# Códigos de transacción. Por ahora SOLO se usa la masiva (BRP va por masiva);
+# AS01 / AS02 / AS06 quedan registradas para cuando se configuren.
+SAP_TX_MASIVA = "Z_AM_MASIVA"      # crear / modificar / borrar masivo
+SAP_TX_CREAR = "AS01"              # pendiente de configurar
+SAP_TX_MODIFICAR = "AS02"          # pendiente de configurar
+SAP_TX_BORRAR = "AS06"             # pendiente de configurar
+
+# Qué transacción usa cada (tipo, acción). Solo lo que ya está configurado.
+SAP_TRANSACCION_POR_CASO = {
+    (TIPO_BRP, ACCION_CREACION): SAP_TX_MASIVA,
+}
+
+# --- Z_AM_MASIVA -------------------------------------------------------------
+# 1) Opción según la acción (crear / modificar / borrar masivo).
+SAP_MASIVA_XPATH_OPCION_ACCION = {
+    ACCION_CREACION: ['//*[@id="M0:46:::1:2-txt"]'],
+    ACCION_MODIFICACION: ['//*[@id="M0:46:::2:2-txt"]'],
+    ACCION_ELIMINACION: ['//*[@id="M0:46:::3:2-txt"]'],
+}
+# 2) Campo donde se PEGA la ruta completa del archivo (la misma para las 3
+#    opciones), ej. C:\...\carga_sap\CREAR (BRP).xlsm. Decisión 2026-09-28:
+#    se escribe la ruta en vez de usar el botón del explorador
+#    ('//*[@id="ls-inputfieldhelpbutton"]'), porque ese botón abre una ventana
+#    de WINDOWS que Selenium no puede manejar.
+SAP_MASIVA_XPATH_CAMPO_RUTA = [
+    '//*[@id="M0:46:::3:59-r"]',
+]
+# 3) "Ejecución de test": se cambia con UN clic en su texto. Según la usuaria,
+#    al entrar a la transacción siempre aparece en el mismo estado, así que un
+#    clic basta (confirmado 2026-09-28; verificar en la 1ª prueba supervisada).
+SAP_MASIVA_XPATH_EJECUCION_TEST = [
+    '//*[@id="M0:46:::5:2-txt"]',
+]
+
+# Botón "Ejecutar" y cuadro de resultados: PENDIENTES (se capturan después de
+# la primera prueba supervisada).
+SAP_XPATH_BOTON_EJECUTAR = []
+# ⚠️ INTERRUPTOR DE SEGURIDAD. No hay SAP de pruebas: ejecutar crea activos
+# REALES. Con False el bot llega hasta deshabilitar "Ejecución de test" y SE
+# DETIENE (no hace clic en Ejecutar). Solo se cambia a True a propósito,
+# después de validar el flujo supervisado.
+SAP_EJECUTAR_REAL = False
+
+# Mientras SAP_EJECUTAR_REAL = False: segundos que el bot deja la pantalla de
+# SAP quieta (lista para revisar) antes de seguir con la siguiente solicitud.
+SAP_PAUSA_REVISION_SEG = 120
+
+
+# ---------------------------------------------------------------------------
+# APPIAN — RESPUESTA EN LA SOLICITUD (capturados en Appian real, 2026-09-28)
+# ---------------------------------------------------------------------------
+# Se vuelve a la URL de la solicitud (CasoBandeja.url) y se responde:
+#   Atender -> modal "Atender solicitud" -> formulario (finalización +
+#   comentario + adjunto) -> Finalizar.
+# La lógica de cuándo es Exitoso / No Exitoso y el texto del comentario se
+# definen más adelante, activo por activo.
+#
+# ⚠️ Varios selectores usan IDs largos generados por Appian
+# ("139287c0..._sectionContents", "45306ca7...", "7f54c5d3..."). Ese tipo de
+# ID resultó INESTABLE en este proyecto (ver Changelog 2026-08-11: cambió
+# entre casos y sesiones). Se dejan como principal, pero hay que agregarles
+# un respaldo por TEXTO VISIBLE (etiqueta del campo / texto del botón).
+
+# Botón en la página de la solicitud que abre las acciones.
+RESPUESTA_XPATH_BOTON_ATENDER = [
+    '//*[@id="sitesBody"]/div/div/div/div/div[1]/div[2]/div/div[1]/div/div[2]/div/div/button',
+]
+# Botón "Atender solicitud" dentro del modal.
+RESPUESTA_XPATH_BOTON_ATENDER_MODAL = [
+    '//*[@id="related-action-body"]/div/div[1]/div[1]/div/div/div/div[2]'
+    '/div/div/div/div/div[3]/div/div/button',
+]
+# Lista desplegable "¿Cómo deseas finalizar esta solicitud?".
+RESPUESTA_XPATH_DROPDOWN_FINALIZACION = [
+    '//*[@id="139287c082d4707c3511cf84c92c6879_sectionContents"]/div/div/div/div',
+]
+RESPUESTA_OPCION_EXITOSO = "Finalizado Exitoso"
+RESPUESTA_OPCION_NO_EXITOSO = "Finalizado No Exitoso"
+# Campo de texto del comentario.
+RESPUESTA_XPATH_COMENTARIO = [
+    '//*[@id="45306ca7cd940b1a7ec4dfd8ab15fe2f"]',
+]
+# Botón para adjuntar el Excel con los resultados de SAP.
+RESPUESTA_XPATH_BOTON_ADJUNTAR = [
+    '//*[@id="139287c082d4707c3511cf84c92c6879_sectionContents"]'
+    '/div/div/div/div/div[4]/div[2]/div/div/div[2]/button',
+]
+# Botón "Finalizar" (cierra la solicitud y Appian notifica al usuario).
+RESPUESTA_XPATH_BOTON_FINALIZAR = [
+    '//*[@id="7f54c5d3d67e507bd6a5d030a08698fa_sectionContents"]'
+    '/div/div/div[3]/div[2]/div/div/button',
+]
+# ⚠️ INTERRUPTOR DE SEGURIDAD. Las solicitudes y los usuarios son REALES
+# (también en MODO PRUEBAS). Con False el bot llena el formulario pero NO
+# hace clic en Finalizar. Solo se cambia a True a propósito.
+APPIAN_RESPONDER_REAL = False
+
+
+# ---------------------------------------------------------------------------
 # NOMBRE DEL EJECUTABLE / APP
 # ---------------------------------------------------------------------------
 APP_NOMBRE = "RPA Activos Fijos"

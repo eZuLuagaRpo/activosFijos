@@ -2,7 +2,7 @@
 orquestador.py — Coordina los 3 flujos por cada caso y arma el resumen final.
 
 Secuencia por cada solicitud detectada en la bandeja:
-    Flujo 1 (obtener datos)  ->  Flujo 2 (validar plantilla)  ->  Flujo 3 (STUB SAP)
+    Flujo 1 (obtener datos)  ->  Flujo 2 (validar plantilla)  ->  Flujo 3 (SAP)
 
 Principios de resiliencia aplicados aquí:
   - AISLAMIENTO POR CASO: cada caso va dentro de su propio try/except. Si uno
@@ -23,13 +23,15 @@ from core.exceptions import CasoOmitidoError, PlantillaInvalidaError, RPAError
 from core.logger import crear_logger
 from core.models import ResultadoCaso, ResumenLote
 from flujos import flujo1_appian, flujo2_validar, flujo3_sap
+from sap.sap_webgui import SapWebGui
 
 
-def _procesar_un_caso(client, caso, logger):
+def _procesar_un_caso(client, sap, caso, logger):
     """
     Ejecuta los flujos 1->2->3 para UN caso (un `CasoBandeja`) y devuelve su
     ResultadoCaso. No lanza excepción: cualquier fallo se captura y se
-    refleja en el resultado.
+    refleja en el resultado. Al terminar (bien o mal) el navegador queda en
+    la pestaña de Appian, que es donde arranca el Flujo 1 del siguiente caso.
     """
     case_id = caso.case_id
     resultado = ResultadoCaso(case_id=case_id)
@@ -45,13 +47,13 @@ def _procesar_un_caso(client, caso, logger):
             solicitud, logger=logger
         )
 
-        # --- Flujo 3: carga a SAP (STUB, pendiente) ---
-        resultado.paso = "Flujo 3 (SAP - pendiente)"
-        flujo3_sap.cargar_a_sap(solicitud, logger=logger)
+        # --- Flujo 3: carga a SAP (hasta antes de Ejecutar, por ahora) ---
+        resultado.paso = "Flujo 3 (SAP)"
+        paso_final = flujo3_sap.cargar_a_sap(sap, solicitud, logger=logger)
 
         resultado.exito = True
-        resultado.paso = "Completado"
-        logger.info("Caso %s procesado correctamente.", case_id)
+        resultado.paso = paso_final or "Completado"
+        logger.info("Caso %s procesado correctamente (%s).", case_id, resultado.paso)
 
     except CasoOmitidoError as e:
         # Saltado a propósito (ej. MODO PRUEBAS sin archivo): no es un fallo.
@@ -78,6 +80,9 @@ def _procesar_un_caso(client, caso, logger):
         logger.error(
             "Caso %s FALLÓ (inesperado) en %s: %s", case_id, resultado.paso, e
         )
+    finally:
+        if sap is not None:
+            sap.volver_a_appian()
 
     return resultado
 
@@ -116,9 +121,13 @@ def ejecutar(user, password, cola=None, logger=None):
         casos = flujo1_appian.listar_casos_pendientes(client, logger=logger)
         resumen.total = len(casos)
 
+        # SAP va en una pestaña del mismo navegador y con las mismas
+        # credenciales. Solo se abre si algún caso llega al Flujo 3.
+        sap = SapWebGui(client.driver, user, password, logger=logger)
+
         # 3) Procesar caso por caso, aislando fallos.
         for caso in casos:
-            resultado = _procesar_un_caso(client, caso, logger)
+            resultado = _procesar_un_caso(client, sap, caso, logger)
             resumen.resultados.append(resultado)
             if resultado.omitido:
                 resumen.omitidos += 1

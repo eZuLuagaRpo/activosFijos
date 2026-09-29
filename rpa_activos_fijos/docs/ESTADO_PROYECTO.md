@@ -114,6 +114,9 @@ rpa_activos_fijos/
 │   └── plantillas/
 │       └── brp_creacion.py     # BRP – Creación: columnas A..AB + V2 (cantidad=1) + V4 (vehículos)
 │
+├── sap/
+│   └── sap_webgui.py           # SAP en el navegador: pestaña, login, transacción, clics (iframes)
+│
 ├── tests/                      # pytest: `python -m pytest tests -q` (usa plantillas/ de la raíz)
 │
 ├── orquestador.py              # Corre Flujo1 → Flujo2 → Flujo3(stub) por cada caso + resumen
@@ -223,6 +226,65 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-09-29 — SAP etapa 1: el bot entra a SAP y se DETIENE antes de
+  Ejecutar.**
+  - Nuevo `sap/sap_webgui.py` (`SapWebGui`): abre SAP en una PESTAÑA NUEVA
+    del mismo navegador de Appian, inicia sesión con las MISMAS
+    credenciales (o detecta sesión ya activa/SSO), escribe transacciones
+    con prefijo `/n`, hace clic/escribe con selectores en lista (respaldos)
+    y busca también dentro de iframes. `volver_a_appian()` siempre al
+    terminar cada caso (el Flujo 1 trabaja en esa pestaña).
+  - `flujo3_sap.cargar_a_sap(sap, solicitud)`: preparar `CREAR (BRP).xlsm`
+    → `/nZ_AM_MASIVA` → opción crear masivo → pegar ruta en
+    `M0:46:::3:59-r` → clic en "Ejecución de test" → con
+    `SAP_EJECUTAR_REAL = False` se detiene y deja la pantalla quieta
+    `SAP_PAUSA_REVISION_SEG` (120 s) para revisión. Si alguien pone el
+    interruptor en True, lanza `SapError` sin ejecutar (botón no
+    configurado).
+  - `orquestador.py`: crea `SapWebGui` tras leer la bandeja (se abre solo
+    si algún caso llega a SAP) y en el `finally` de cada caso vuelve a la
+    pestaña de Appian.
+  - `config.py`: `SAP_XPATH_LOGIN_*` (IDs estándar de SAP, **POR
+    CONFIRMAR** en el ambiente real), `SAP_PAUSA_REVISION_SEG`.
+    "Ejecución de test": un clic (la usuaria indica que siempre inicia en
+    el mismo estado) → verificar en la 1ª prueba supervisada.
+  - Pruebas: `tests/test_sap_etapa1.py` (11) con navegador falso (login,
+    SSO, pestañas, iframe, orden exacto de pasos, nunca ejecuta, vuelve a
+    Appian aunque SAP falle) → total 52 OK. Simulación completa Appian +
+    SAP falsos OK; la contraseña no aparece en el log.
+  - `GUIA_MODO_PRUEBAS.md` actualizada (qué revisar en la pausa, errores
+    nuevos de SAP).
+
+- **2026-09-28 (2) — Selectores de SAP (Z_AM_MASIVA) y de la respuesta en
+  Appian configurados en `config.py` (sin flujo todavía).**
+  - SAP es **web** (SAP GUI for HTML: `ToolbarOkCode`, `M0:46:::…`) → se
+    manejará con Selenium, como Appian.
+  - SAP: `SAP_URL` (placeholder), barra de transacción, códigos
+    `Z_AM_MASIVA` (en uso) y AS01/AS02/AS06 (registrados, sin configurar),
+    `SAP_TRANSACCION_POR_CASO = {(brp, creacion): Z_AM_MASIVA}`, opción por
+    acción (crear/modificar/borrar masivo), habilitar archivo, botón del
+    explorador, "Ejecución de test". Botón Ejecutar y cuadro de resultados:
+    pendientes. Interruptor `SAP_EJECUTAR_REAL = False`.
+  - Appian respuesta: botón atender, botón del modal, lista "¿Cómo deseas
+    finalizar…?" (Finalizado Exitoso / No Exitoso), comentario, adjuntar,
+    Finalizar. Interruptor `APPIAN_RESPONDER_REAL = False` (no hace clic en
+    Finalizar).
+  - Riesgos anotados: (a) los IDs largos de Appian en la respuesta son del
+    tipo que resultó inestable el 2026-08-11 → falta respaldo por texto;
+    (b) "Ejecución de test" es un interruptor (hacer clic de más la
+    reactiva) → falta selector de la casilla para leer su estado; (c) el
+    botón del explorador abre una ventana de Windows, que Selenium no
+    maneja → **resuelto**: se PEGA la ruta en `SAP_MASIVA_XPATH_CAMPO_RUTA`
+    (`M0:46:::3:59-r`), confirmado por el usuario.
+  - `SAP_URL` real: `https://sap-erp.apps.bancolombia.corp/sap/bc/gui/sap/its/webgui?sap-client=900#`
+    (falta confirmar el inicio de sesión).
+  - Hallazgo para la respuesta en Appian: la librería corporativa ya llena
+    formularios POR ETIQUETA (`FormHandler.fill_form({etiqueta: valor})`:
+    listas, textos y adjuntos vía `input[type=file]`, sin ventana de
+    Windows) y ubica botones por TEXTO (`XPathBuilder.button_by_text`).
+    Su `advance_case()` hace todo el recorrido pero SIEMPRE finaliza, así
+    que no respeta `APPIAN_RESPONDER_REAL`; se propuso usar sus piezas.
 
 - **2026-09-28 — Nombre exacto del archivo para SAP + BRP Creación solo .xlsm.**
   - Confirmado con la usuaria funcional: en la carga masiva SAP exige que la
