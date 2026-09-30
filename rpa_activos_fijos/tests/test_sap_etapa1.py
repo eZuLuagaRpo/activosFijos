@@ -128,6 +128,10 @@ class FakeBrowser:
 def rapido(monkeypatch):
     monkeypatch.setattr(sap_webgui, "TIMEOUT", 1)
     monkeypatch.setattr(flujo3_sap, "SAP_PAUSA_REVISION_SEG", 0)
+    # Aquí se prueba la navegación en SAP (con archivos de mentira); quitar la
+    # columna AC se prueba en test_flujo3_archivo_sap.py con Excel reales.
+    monkeypatch.setattr(flujo3_sap, "COLUMNAS_QUITAR_ANTES_DE_SAP", {})
+    monkeypatch.setattr(flujo3_sap, "ULTIMA_COLUMNA_PLANTILLA", {})
 
 
 def sap_con(navegador, logger=None):

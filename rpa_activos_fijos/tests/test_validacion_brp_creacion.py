@@ -19,12 +19,14 @@ from core.models import Solicitud
 from flujos import flujo2_validar
 from validacion.plantillas.brp_creacion import ValidadorBrpCreacion
 
-PLANTILLA = os.path.join(
+CARPETA_BRP = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "plantillas",
     "BRP",
-    "Plantilla Creación Activos BRP.xlsm",
 )
+# La que envía el USUARIO (A..AC) y la que recibe SAP en la masiva (A..AB).
+PLANTILLA = os.path.join(CARPETA_BRP, "Plantilla Creación Activos BRP usuario.xlsm")
+PLANTILLA_SAP = os.path.join(CARPETA_BRP, "Plantilla Creación Activos BRP.xlsm")
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(PLANTILLA), reason="No está la plantilla oficial de BRP"
@@ -214,6 +216,43 @@ def test_v5_largos_excedidos_son_advertencia(tmp_path):
     r = validar(crear_excel(tmp_path, [fila_valida(T="X" * 31, U="Y" * 16)]))
     assert r.valida
     assert len(r.filas[0].advertencias) == 2
+
+
+# -- Columna extra AC (TXT.NUM.PRAL.AF) ------------------------------------------
+
+def test_ac_vacia_es_valida(tmp_path):
+    r = validar(crear_excel(tmp_path, [fila_valida(AC=None)]))
+    assert r.valida
+
+
+def test_ac_con_50_caracteres_es_valida(tmp_path):
+    r = validar(crear_excel(tmp_path, [fila_valida(AC="X" * 50)]))
+    assert r.valida and not r.filas[0].advertencias
+
+
+def test_ac_con_mas_de_50_caracteres_es_error(tmp_path):
+    r = validar(crear_excel(tmp_path, [fila_valida(AC="X" * 51)]))
+    assert not r.valida
+    assert "AC (Nombre y NIT del acreedor) tiene 51 caracteres (máximo 50)" in r.filas[0].errores[0]
+
+
+def test_plantilla_sin_columna_ac_se_rechaza(tmp_path):
+    # La plantilla de SAP (A..AB) no sirve como plantilla del usuario: le falta AC.
+    destino = tmp_path / "sin_ac.xlsm"
+    shutil.copy(PLANTILLA_SAP, destino)
+    libro = load_workbook(destino, keep_vba=True)
+    for letra, valor in fila_valida().items():
+        libro.worksheets[0][f"{letra}2"] = valor
+    libro.save(destino)
+    r = validar(str(destino))
+    assert not r.valida
+    assert "AC 'TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)'" in r.errores_plantilla[0]
+
+
+def test_columna_s_acreedor_sigue_siendo_otra_columna(tmp_path):
+    # S "ACREEDOR" e AC son campos distintos: S sin límite de 50, AC sí.
+    r = validar(crear_excel(tmp_path, [fila_valida(S="Y" * 80, AC="Z" * 10)]))
+    assert r.valida
 
 
 # -- Regla final · Todo o nada + integración con el Flujo 2 ---------------------

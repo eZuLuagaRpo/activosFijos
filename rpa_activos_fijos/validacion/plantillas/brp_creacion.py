@@ -2,9 +2,17 @@
 validacion/plantillas/brp_creacion.py — Plantilla "Creación Activos BRP".
 
 Carga MASIVA: cada fila de datos (desde la fila 2) es un activo a crear.
-Plantilla oficial: plantillas/BRP/Plantilla Creación Activos BRP.xlsm (hoja
-"FORMATO", encabezados en la fila 1, columnas A..AB). La macro `Crear_BRP`
-que trae el archivo es una utilidad del usuario: se ignora.
+Plantilla que envía el USUARIO: plantillas/BRP/Plantilla Creación Activos
+BRP usuario.xlsm (hoja "FORMATO", encabezados en la fila 1, columnas A..AC).
+  - A..AB: formato EXACTO de la carga masiva de SAP (referencia:
+    plantillas/BRP/Plantilla Creación Activos BRP.xlsm).
+  - AC "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" (2026-09-29): columna
+    EXTRA que SAP no acepta en la masiva. Se QUITA de la copia para SAP
+    (COLUMNAS_QUITAR_ANTES_DE_SAP en config.py) y su valor se escribe
+    después, activo por activo, en AS02. Informativa, máx. 50 caracteres
+    (si se excede = ERROR). Es obligatorio que la columna EXISTA: una
+    plantilla sin AC se rechaza por encabezado faltante (V3).
+La macro `Crear_BRP` que trae el archivo es una utilidad del usuario: se ignora.
 
 Reglas (entregadas por negocio, 2026-09-27):
   V1 · Obligatorios A, B, C, D, F, H, O, W (vacío = sin contenido, solo
@@ -62,7 +70,7 @@ class ValidadorBrpCreacion(BaseValidador):
         Columna("P", "TIPO OBLIGATORIO", "Tipo de Activo", INFORMATIVO),
         Columna("Q", "PROCEDENCIA OBLIGATORIA", "Procedencia", INFORMATIVO),
         Columna("R", "UBICACIÓN OBLIGATORIA", "Ubicación", INFORMATIVO),
-        Columna("S", "ACREEDOR", "Nombre y NIT del Acreedor", INFORMATIVO),
+        Columna("S", "ACREEDOR", "Acreedor", INFORMATIVO),
         Columna("T", "FABRICANTE (SERIE) 30 caracteres", "Fabricante", INFORMATIVO, max_largo=30),
         Columna("U", "DENOMINACION DE TIPO. MODELO (15 caracteres)", "Modelo", CONDICIONAL, max_largo=15),
         Columna("V", "PARTE PROD.PROPIA", "% Participación", INFORMATIVO),
@@ -72,6 +80,11 @@ class ValidadorBrpCreacion(BaseValidador):
         Columna("Z", "AREA DE VALORACIÓN", "Área de Valoración", INFORMATIVO),
         Columna("AA", "DURACIÓN", "Duración", INFORMATIVO),
         Columna("AB", "PERIODO", "Periodo", NO_SE_VALIDA),
+        # Columna EXTRA (solo la usa el bot; se quita antes de SAP y se
+        # escribe luego en AS02). Informativa, pero > 50 caracteres = ERROR.
+        Columna("AC", "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)",
+                "Nombre y NIT del acreedor", INFORMATIVO,
+                max_largo=50, largo_es_error=True),
     )
 
     def reglas_fila(self, fila, resultado_fila):

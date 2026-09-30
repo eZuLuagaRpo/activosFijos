@@ -1,10 +1,14 @@
 """
 flujos/flujo3_sap.py — FLUJO 3: carga a SAP.
 
-Qué se carga: el MISMO Excel que adjuntó el usuario (ya validado en el Flujo
-2); no hay transformación a otro formato. Pero SAP exige que el archivo se
-llame EXACTAMENTE de una forma según (tipo, acción) — ej. "CREAR (BRP).xlsm"
-— ver NOMBRE_ARCHIVO_SAP en config.py.
+Qué se carga: una COPIA del Excel que adjuntó el usuario (ya validado en el
+Flujo 2), con dos ajustes:
+  - el nombre EXACTO que exige SAP según (tipo, acción), ej.
+    "CREAR (BRP).xlsm" (NOMBRE_ARCHIVO_SAP en config.py), y
+  - SIN las columnas extra que SAP no acepta, ej. la AC de BRP - Creación
+    (COLUMNAS_QUITAR_ANTES_DE_SAP), ni nada a la derecha de la última
+    columna de la plantilla (ULTIMA_COLUMNA_PLANTILLA). El Excel del usuario
+    conserva todo.
 
 Etapas (se construye por partes, supervisado — no hay SAP de pruebas):
   ✅ Etapa 1: preparar el archivo -> abrir la transacción -> escoger la
@@ -22,8 +26,13 @@ import os
 import shutil
 import time
 
+from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string
+
 from config import (
     CARGA_SAP_DIR,
+    COLUMNAS_QUITAR_ANTES_DE_SAP,
+    ULTIMA_COLUMNA_PLANTILLA,
     NOMBRE_ARCHIVO_SAP,
     SAP_EJECUTAR_REAL,
     SAP_MASIVA_XPATH_CAMPO_RUTA,
@@ -35,6 +44,7 @@ from config import (
     SAP_XPATH_BOTON_EJECUTAR,
 )
 from core.exceptions import SapError
+from validacion.base_validador import normalizar_encabezado
 
 
 def preparar_archivo_sap(solicitud, logger=None):
@@ -82,15 +92,82 @@ def preparar_archivo_sap(solicitud, logger=None):
             f"desde {solicitud.excel_path}: {e}"
         )
 
+    # Ajustes SOLO de la copia (el Excel del usuario no se toca):
+    #   1) quitar todo lo que esté a la derecha de la última columna de la
+    #      plantilla (ej. notas del usuario en AD, AE...), y
+    #   2) quitar las columnas que SAP no acepta (ej. AC en BRP - Creación).
+    # Si falla, se borra la copia (nunca queda un archivo a medias listo
+    # para cargar).
+    a_quitar = COLUMNAS_QUITAR_ANTES_DE_SAP.get(clave, [])
+    ultima = ULTIMA_COLUMNA_PLANTILLA.get(clave)
+    sobrantes = 0
+    if a_quitar or ultima:
+        try:
+            sobrantes = _ajustar_columnas(destino, a_quitar, ultima)
+        except Exception as e:
+            try:
+                os.remove(destino)
+            except OSError:
+                pass
+            raise SapError(
+                f"Caso {solicitud.case_id}: no se pudieron quitar las columnas "
+                f"{a_quitar} de '{nombre_sap}': {e}"
+            )
+
     solicitud.archivo_sap = destino
     if logger:
         logger.info(
-            "Caso %s: archivo para SAP preparado -> %s (copia de %s)",
+            "Caso %s: archivo para SAP preparado -> %s (copia de %s%s)",
             solicitud.case_id,
             destino,
             os.path.basename(solicitud.excel_path),
+            f", SIN la(s) columna(s) {a_quitar}" if a_quitar else "",
         )
+        if sobrantes:
+            logger.warning(
+                "Caso %s: el Excel traía %s columna(s) después de %s (fuera de "
+                "la plantilla); se quitaron de la copia para SAP.",
+                solicitud.case_id,
+                sobrantes,
+                ultima,
+            )
     return destino
+
+
+def _ajustar_columnas(ruta, encabezados, ultima_letra=None):
+    """
+    En la PRIMERA hoja de `ruta`:
+      1) si hay `ultima_letra`, borra todas las columnas a su derecha, y
+      2) borra las columnas cuyo encabezado (fila 1) coincide con alguno de
+         `encabezados` (comparación normalizada, igual que en la validación).
+    Conserva las macros (.xlsm). Devuelve cuántas columnas se quitaron en 1).
+
+    Raises:
+        ValueError: si alguno de los encabezados no está en el archivo.
+    """
+    libro = load_workbook(ruta, keep_vba=ruta.lower().endswith(".xlsm"))
+    hoja = libro.worksheets[0]
+
+    sobrantes = 0
+    if ultima_letra:
+        limite = column_index_from_string(ultima_letra)
+        sobrantes = max(hoja.max_column - limite, 0)
+        if sobrantes:
+            hoja.delete_cols(limite + 1, sobrantes)
+
+    fila1 = [normalizar_encabezado(c.value) for c in hoja[1]]
+    indices = []
+    for encabezado in encabezados:
+        buscado = normalizar_encabezado(encabezado)
+        if buscado not in fila1:
+            raise ValueError(f"no se encontró la columna '{encabezado}' en la fila 1")
+        indices.append(fila1.index(buscado) + 1)
+
+    # De derecha a izquierda, para que borrar una no corra a las demás.
+    for indice in sorted(indices, reverse=True):
+        hoja.delete_cols(indice)
+    libro.save(ruta)
+    return sobrantes
 
 
 def cargar_a_sap(sap, solicitud, logger=None):

@@ -209,6 +209,25 @@ NOMBRE_ARCHIVO_SAP = {
     (TIPO_BRP, ACCION_CREACION): "CREAR (BRP).xlsm",
 }
 
+# Columnas que trae la plantilla del USUARIO pero que SAP NO acepta en la
+# carga masiva: se QUITAN de la copia para SAP (el Excel del usuario las
+# conserva, porque se usan después y se le devuelven). Se ubican por
+# ENCABEZADO, no por letra.
+#   BRP - Creación: "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" (columna
+#   AC). SAP no la recibe en la masiva; su valor se escribe después, activo
+#   por activo, en AS02 (2026-09-29).
+COLUMNAS_QUITAR_ANTES_DE_SAP = {
+    (TIPO_BRP, ACCION_CREACION): ["TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)"],
+}
+
+# Última columna de la plantilla del USUARIO. Todo lo que esté a la derecha
+# (ej. notas que el usuario escribió en AD, AE...) se QUITA de la copia para
+# SAP, porque SAP espera exactamente sus columnas (decisión 2026-09-29). La
+# validación ya ignora esas celdas; el Excel del usuario las conserva.
+ULTIMA_COLUMNA_PLANTILLA = {
+    (TIPO_BRP, ACCION_CREACION): "AC",
+}
+
 
 # ---------------------------------------------------------------------------
 # SAP — TRANSACCIONES Y SELECTORES (capturados en SAP real, 2026-09-28)
@@ -281,6 +300,24 @@ SAP_EJECUTAR_REAL = False
 # Mientras SAP_EJECUTAR_REAL = False: segundos que el bot deja la pantalla de
 # SAP quieta (lista para revisar) antes de seguir con la siguiente solicitud.
 SAP_PAUSA_REVISION_SEG = 120
+
+# --- AS02 (modificar activo, uno por uno) -------------------------------------
+# BRP - Creación: después de la masiva, por CADA activo creado se entra a AS02
+# y se escribe el valor de la columna "TXT.NUM.PRAL.AF (Nombre y NIT del
+# acreedor)" (capturado 2026-09-29). ⚠️ El recorrido aún NO está programado
+# (ver docs/PENDIENTES.md, P6); aquí solo quedan los selectores.
+# Pantalla inicial de AS02:
+SAP_AS02_XPATH_ACTIVO_FIJO = ['//*[@id="M0:46:::2:21-r"]']   # = Código SAP de la fila
+SAP_AS02_XPATH_SOCIEDAD = ['//*[@id="M0:46:::4:21"]']        # = columna B (Sociedad)
+# (luego Enter) Pantalla del activo: campo donde va la columna extra. Puede
+# traer texto: se BORRA antes de escribir.
+SAP_AS02_XPATH_TXT_ACREEDOR = ['//*[@id="M0:46:3:1:2B256:1::3:22"]']
+# Guardar: btn[11] es el botón "Guardar" estándar de SAP (Ctrl+S = respaldo).
+SAP_XPATH_BOTON_GUARDAR = ['//*[@id="M0:36::btn[11]"]']
+# ⚠️ INTERRUPTOR DE SEGURIDAD. Guardar en AS02 MODIFICA activos REALES. Con
+# False el bot llena AS02 pero NO guarda. Ventaja: se puede probar con un
+# activo que ya exista, sin crear nada.
+SAP_MODIFICAR_REAL = False
 
 
 # ---------------------------------------------------------------------------

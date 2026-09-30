@@ -129,7 +129,8 @@ rpa_activos_fijos/
     ├── ESTADO_PROYECTO.md         # este archivo
     ├── CONFIGURACION_MANUAL.md    # lo que hay que conseguir/configurar a mano
     ├── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
-    └── GUIA_MODO_PRUEBAS.md       # paso a paso para probar con MODO_PRUEBAS_REEMPLAZO
+    ├── GUIA_MODO_PRUEBAS.md       # paso a paso para probar con MODO_PRUEBAS_REEMPLAZO
+    └── PENDIENTES.md              # TODO lo que falta, detallado (P1..P11)
 ```
 
 ### Cómo fluyen los datos (resumen)
@@ -226,6 +227,37 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-09-29 (2) — BRP – Creación: plantilla del usuario con columna AC
+  + copia para SAP sin AC + selectores de AS02.**
+  - Nuevo requerimiento: la masiva de SAP no acepta el campo "TXT.NUM.PRAL.AF
+    (Nombre y NIT del acreedor)"; el usuario lo envía en una columna extra
+    **AC** y el bot lo escribirá después en AS02, activo por activo
+    (PENDIENTES.md P6). La columna S "ACREEDOR" es OTRO campo (sin cambios).
+  - Plantilla del usuario: `plantillas/BRP/Plantilla Creación Activos BRP
+    usuario.xlsm` (A..AC). Se borró una fila 3 con valores sueltos
+    (confirmado por el usuario) editando solo esa fila del XML (macros y
+    comentarios intactos). `Plantilla Creación Activos BRP.xlsm` (A..AB)
+    queda como referencia del formato que recibe SAP.
+  - Validación: columna AC informativa, **> 50 caracteres = ERROR** (nuevo
+    `Columna.largo_es_error`; T y U siguen como advertencia). Plantilla sin
+    AC → rechazada por encabezado faltante. Etiqueta de S cambiada a
+    "Acreedor" para no confundirla con AC.
+  - `preparar_archivo_sap()`: tras copiar, quita las columnas de
+    `COLUMNAS_QUITAR_ANTES_DE_SAP` (por encabezado, conserva macros); si
+    falla, borra la copia. La copia queda con los mismos encabezados que la
+    plantilla de SAP (prueba automática).
+  - `config.py`: `COLUMNAS_QUITAR_ANTES_DE_SAP`, selectores de AS02
+    (`SAP_AS02_XPATH_*`, `SAP_XPATH_BOTON_GUARDAR`) e interruptor
+    `SAP_MODIFICAR_REAL = False` (el recorrido de AS02 aún no existe).
+  - Pruebas: 60 OK (+ AC ≤ 50 / > 50, sin AC, S ≠ AC, copia = plantilla SAP,
+    usuario conserva AC, copia a medias se borra). Simulación completa OK.
+  - Docs: GUIA_MODO_PRUEBAS.md reescrita (plantilla del usuario, sección de
+    interruptores); nuevo PENDIENTES.md (P1 y P2 ✅).
+  - Decisión posterior (opción b): todo lo que esté a la derecha de AC se
+    quita de la copia para SAP (`ULTIMA_COLUMNA_PLANTILLA = {(brp,
+    creacion): "AC"}`), con aviso en el log; el Excel del usuario lo
+    conserva. `_quitar_columnas` → `_ajustar_columnas`. Pruebas: 61 OK.
 
 - **2026-09-29 — SAP etapa 1: el bot entra a SAP y se DETIENE antes de
   Ejecutar.**

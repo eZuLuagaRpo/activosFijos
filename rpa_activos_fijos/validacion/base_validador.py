@@ -46,7 +46,8 @@ class Columna:
     encabezado: str                   # texto del encabezado en la fila 1
     campo: str                        # nombre de negocio (para los mensajes)
     tipo: str = NO_SE_VALIDA
-    max_largo: Optional[int] = None   # si se excede -> advertencia
+    max_largo: Optional[int] = None   # si se excede -> advertencia...
+    largo_es_error: bool = False      # ...o ERROR (invalida la fila) si es True
 
 
 def normalizar_encabezado(texto):
@@ -230,13 +231,15 @@ class BaseValidador:
                 "Faltan campos obligatorios: " + ", ".join(faltantes)
             )
 
-        # Largo máximo (campos informativos/condicionales) -> advertencia.
+        # Largo máximo -> advertencia (o error si la columna lo pide).
         for col in self.columnas:
             valor = fila.get(col.letra)
             if col.max_largo and not es_vacia(valor):
                 largo = len(como_texto(valor))
                 if largo > col.max_largo:
-                    resultado_fila.advertencias.append(
+                    destino = (resultado_fila.errores if col.largo_es_error
+                               else resultado_fila.advertencias)
+                    destino.append(
                         f"{self.etiqueta(col.letra)} tiene {largo} caracteres "
                         f"(máximo {col.max_largo}); SAP podría cortarlo o rechazarlo."
                     )
