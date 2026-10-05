@@ -7,7 +7,7 @@ sin depender de diccionarios sueltos.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -35,13 +35,17 @@ class Solicitud:
     tipo: Optional[str] = None        # tipo de activo canónico (ver config.py)
     accion: Optional[str] = None      # acción canónica (creacion/modificacion/...)
     excel_path: Optional[str] = None  # ruta completa del Excel descargado de Appian
-    archivo_sap: Optional[str] = None  # copia con el nombre que exige SAP (Flujo 3)
     info_df: Any = None               # DataFrame label|value con todo el detalle
     fecha_vencimiento: Optional[str] = None  # heredada de la bandeja (prioridad)
 
     # Textos crudos tal como venían en Appian (útil para diagnóstico/logs).
     tipo_crudo: Optional[str] = None
     accion_cruda: Optional[str] = None
+
+    # Resultado de SAP por fila del Excel (Flujo 3): {numero_fila: texto}. El
+    # texto es el código del activo creado o el mensaje de error; va a la
+    # columna "Código SAP" que se le devuelve al usuario.
+    resultados_sap: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass

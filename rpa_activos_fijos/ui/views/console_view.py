@@ -20,6 +20,9 @@ import customtkinter as ctk
 
 import orquestador
 
+# Aviso especial en la cola (bot -> UI): "habilita el botón Continuar".
+ESPERAR_CONTINUAR = "__ESPERAR_CONTINUAR__"
+
 
 class ConsoleView(ctk.CTkFrame):
     """Consola de ejecución + estado + botones Ejecutar/Volver."""
@@ -33,6 +36,9 @@ class ConsoleView(ctk.CTkFrame):
         self.cola = queue.Queue()
         self.ejecutando = False
         self.hilo = None
+        # Supervisión en SAP: el bot (hilo secundario) espera este evento; el
+        # botón "Continuar" lo activa.
+        self.evento_continuar = threading.Event()
 
         self.pack_propagate(False)
         self.grid_propagate(False)
@@ -111,6 +117,24 @@ class ConsoleView(ctk.CTkFrame):
         )
         self.volver_btn.pack(side="left")
 
+        # Supervisión en SAP: solo se habilita cuando el bot se detiene antes
+        # de Guardar. Pasa al siguiente activo SIN guardar.
+        self.continuar_btn = ctk.CTkButton(
+            botones,
+            text="Continuar (sin guardar)",
+            width=220,
+            height=40,
+            corner_radius=14,
+            fg_color=colors["primary"],
+            text_color=colors["dark"],
+            hover_color=colors["hover_yellow"],
+            text_color_disabled=colors["muted"],
+            font=ctk.CTkFont(size=13, weight="bold"),
+            state="disabled",
+            command=self._on_continuar,
+        )
+        self.continuar_btn.pack(side="right")
+
         # Empezamos a vaciar la cola periódicamente.
         self._consumir_cola()
 
@@ -131,7 +155,10 @@ class ConsoleView(ctk.CTkFrame):
         try:
             while True:
                 nivel, mensaje = self.cola.get_nowait()
-                self._escribir(nivel, mensaje)
+                if nivel == ESPERAR_CONTINUAR:
+                    self._mostrar_espera()
+                else:
+                    self._escribir(nivel, mensaje)
         except queue.Empty:
             pass
         # Volver a revisar en 100 ms (esto mantiene la UI fluida).
@@ -166,7 +193,9 @@ class ConsoleView(ctk.CTkFrame):
     def _correr_bot(self, user, password):
         """Se ejecuta EN EL HILO SECUNDARIO. No debe tocar widgets directamente."""
         try:
-            orquestador.ejecutar(user, password, cola=self.cola)
+            orquestador.ejecutar(
+                user, password, cola=self.cola, esperar_continuar=self._esperar_continuar
+            )
             estado, color = "Terminado", self.colors["success"]
         except Exception as e:
             # Cualquier fallo no controlado se informa por la cola.
@@ -178,8 +207,30 @@ class ConsoleView(ctk.CTkFrame):
 
     def _finalizar(self, estado, color):
         self.ejecutando = False
+        self.continuar_btn.configure(state="disabled")
         self.volver_btn.configure(state="normal")
         self._set_estado(estado, color)
+
+    # -- Supervisión en SAP: botón "Continuar" ----------------------------------
+    def _esperar_continuar(self, texto):
+        """
+        Se ejecuta EN EL HILO DEL BOT y BLOQUEA hasta que la persona presione
+        "Continuar". No toca widgets (tkinter no lo permite desde otro hilo):
+        deja un aviso en la COLA y la UI, en su propio hilo, habilita el botón.
+        El bot ya está detenido antes de Guardar; al continuar sale SIN guardar.
+        """
+        self.evento_continuar.clear()
+        self.cola.put((ESPERAR_CONTINUAR, texto))
+        self.evento_continuar.wait()
+
+    def _mostrar_espera(self):
+        self.continuar_btn.configure(state="normal")
+        self._set_estado("Esperando revisión en SAP", self.colors["primary"])
+
+    def _on_continuar(self):
+        self.continuar_btn.configure(state="disabled")
+        self._set_estado("Ejecutando", self.colors["blue"])
+        self.evento_continuar.set()
 
     def _on_volver(self):
         if self.ejecutando:

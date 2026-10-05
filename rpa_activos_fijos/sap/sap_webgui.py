@@ -14,6 +14,8 @@ Reglas aplicadas (las mismas que en el resto del bot):
   - La contraseña NUNCA se escribe en el log.
 """
 
+import time
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -131,6 +133,38 @@ class SapWebGui:
         except Exception as e:
             raise SapError(f"No se pudo hacer clic en {descripcion}: {e}")
 
+    def doble_clic_lento(self, lista_xpath, descripcion, espera):
+        """
+        DOS clics separados por `espera` segundos, y otra `espera` al final.
+        Para las pestañas de los formularios de SAP: un solo clic no funciona
+        y SAP es lento al cambiar de pestaña.
+        """
+        self.clic(lista_xpath, descripcion)
+        time.sleep(espera)
+        self.clic(lista_xpath, descripcion)
+        time.sleep(espera)
+
+    def enter(self):
+        """Presiona Enter en el elemento que tiene el foco."""
+        try:
+            self.driver.switch_to.active_element.send_keys(Keys.ENTER)
+        except Exception as e:
+            raise SapError(f"No se pudo presionar Enter en SAP: {e}")
+
+    def existe(self, lista_xpath, segundos):
+        """Espera hasta `segundos` a que aparezca el elemento. Devuelve el
+        elemento o None (no lanza). Para lo que PUEDE o no aparecer."""
+        try:
+            clave = self._esperar_alguno({"x": lista_xpath}, "elemento opcional", segundos)
+            return self._encontrado[clave]
+        except SapError:
+            return None
+
+    def leer_texto(self, lista_xpath, descripcion):
+        """Texto visible del elemento (espera a que aparezca)."""
+        elemento = self.esperar(lista_xpath, descripcion)
+        return (elemento.text or "").strip()
+
     def escribir(self, lista_xpath, texto, descripcion, registrar_valor=True):
         """Borra lo que tenga el campo, escribe `texto` y sale del campo (Tab)
         para que SAP registre el valor."""
@@ -151,12 +185,14 @@ class SapWebGui:
         clave = self._esperar_alguno({"x": lista_xpath}, descripcion)
         return self._encontrado[clave]
 
-    def _esperar_alguno(self, opciones, descripcion):
+    def _esperar_alguno(self, opciones, descripcion, tope=None):
         """
         Espera a que aparezca CUALQUIERA de las `opciones` ({clave: lista de
         XPath}) y devuelve la clave de la que apareció. El elemento queda en
         self._encontrado[clave] y el driver queda dentro del frame donde está.
+        `tope`: segundos máximos (por defecto TIMEOUT).
         """
+        tope = TIMEOUT if tope is None else tope
         self._encontrado = {}
 
         def buscar(_driver):
@@ -168,10 +204,10 @@ class SapWebGui:
             return False
 
         try:
-            return WebDriverWait(self.driver, TIMEOUT).until(buscar)
+            return WebDriverWait(self.driver, tope).until(buscar)
         except Exception:
             raise SapError(
-                f"SAP: no apareció {descripcion} tras {TIMEOUT}s. Revisa los "
+                f"SAP: no apareció {descripcion} tras {tope}s. Revisa los "
                 f"selectores en config.py: {list(opciones.values())}"
             )
 

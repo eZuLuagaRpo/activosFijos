@@ -9,6 +9,20 @@
 > Cada cosa dice **qué es**, **por qué se necesita** y **dónde exactamente se
 > pega** en el código.
 
+> 📌 **Estado de este documento (actualizado 2026-10-04).** Se escribió al
+> inicio del proyecto; desde entonces varias cosas ya se capturaron o
+> cambiaron:
+> - **Vigente:** sección 1 (datos básicos), 2 (cómo capturar un XPath con
+>   F12) y 8 (empaquetado y driver de Edge).
+> - **Ya resuelto:** secciones 3, 4 y 5 (bandeja, tipo/acción en "Detalles",
+>   bandeja mezclada) — los valores reales están en `config.py` y su historia
+>   en el Changelog de [ESTADO_PROYECTO.md](ESTADO_PROYECTO.md).
+> - **Obsoleto:** sección 6 (mapeo a macro SAP). No hay transformación ni
+>   carga masiva: el bot llena los formularios de **AS01 / AS02 / AS06**
+>   activo por activo.
+> - **Lo que hoy falta configurar** (formularios de SAP, respuesta en
+>   Appian, paginación, etc.) está en [PENDIENTES.md](PENDIENTES.md).
+
 ---
 
 ## Índice
@@ -214,12 +228,14 @@ solicitudes de activos fijos. **Esto hay que confirmarlo con ella.**
 
 ## 6. Mapeo de columnas Appian → macro SAP
 
-> ⚠️ **OBSOLETO desde el 2026-09-27.** El Excel que adjunta el usuario ya es
-> el formato de SAP: no hay mapeo ni `transformacion/` (se eliminó). Las
-> reglas de cada plantilla viven ahora en `validacion/plantillas/` y las
-> plantillas oficiales en `plantillas/` (raíz del repo). Ver el Changelog de
-> [ESTADO_PROYECTO.md](ESTADO_PROYECTO.md). Se conserva el texto de abajo
-> solo como histórico.
+> ⚠️ **OBSOLETO.** Desde el 2026-09-27 no hay mapeo ni `transformacion/`
+> (se eliminó), y desde el 2026-10-04 tampoco hay carga masiva: el bot lee
+> cada fila del Excel del usuario y llena el formulario de la transacción
+> individual de SAP (AS01 crear / AS02 modificar / AS06 borrar). La relación
+> "columna del Excel → campo de SAP" se configurará en `config.py` (ver
+> [PENDIENTES.md](PENDIENTES.md), P3). Las reglas de cada plantilla viven en
+> `validacion/plantillas/` y las plantillas oficiales en `plantillas/` (raíz
+> del repo). Se conserva el texto de abajo solo como histórico.
 
 Este es el dato de negocio más importante que **falta**. Es la "tabla de
 traducción" que dice: *la columna X del Excel de Appian va a la columna Y de la
@@ -267,12 +283,12 @@ PLANTILLAS_MACRO = {
 
 El bot se probará en el PC de la compañera. Consigue de ahí (o pídeselo):
 
-1. **Las macros/plantillas reales** de creación, modificación y eliminación
-   (los `.xlsx` de destino). → Van a `transformacion/mapping/` (sección 6.1).
-   *Por qué:* sin el formato real de salida no se puede armar el archivo para SAP.
-2. **Ejemplos reales del Excel** que Appian adjunta, **uno por cada tipo de
-   activo** (máscaras, BRP, PRJ, diferidos, mejoras).
-   *Por qué:* para conocer los nombres de columna reales y construir el mapeo.
+1. ~~Las macros/plantillas de SAP~~ → ya no aplica (no hay carga masiva).
+   En su lugar: los **XPath de los formularios de AS01 / AS02 / AS06** y qué
+   columna del Excel va en cada campo (ver [PENDIENTES.md](PENDIENTES.md), P3).
+2. **La plantilla oficial y el Word de proceso** de cada tipo de activo y
+   acción (máscaras, BRP, PRJ, diferidos, mejoras) → `plantillas/<ACTIVO>/`.
+   *Por qué:* de ahí salen las reglas de validación y los campos a llenar.
 3. **La URL exacta de Appian** que ella usa. → `APPIAN_URL` (sección 1).
    *Por qué:* el bot no puede entrar sin la dirección correcta.
 4. **IDs de solicitudes reales** de prueba (ej. `PDA-2389`).
@@ -342,14 +358,11 @@ Marca cada punto cuando lo completes:
 
 - [ ] `APPIAN_URL` con la URL real (sección 1)
 - [ ] `BROWSER` confirmado como Edge (sección 1)
-- [ ] `BANDEJA_XPATH_FILAS` capturado (sección 3.1)
-- [ ] `BANDEJA_XPATH_ID_EN_FILA` capturado (sección 3.2)
-- [ ] `LABELS_TIPO_ACTIVO` con el texto real (sección 4)
-- [ ] `LABELS_ACCION` con el texto real (sección 4)
-- [ ] Supuesto de la bandeja confirmado (sección 5)
-- [ ] Macros/plantillas reales colocadas en `transformacion/mapping/` (sección 6.1)
-- [ ] `MAPEO` de columnas completado (sección 6)
-- [ ] Ejemplos de Excel de Appian por cada tipo (sección 7)
+- [x] Selectores de la bandeja capturados (sección 3) — ver `config.py`
+- [x] Tipo de activo y acción desde "Detalles" (sección 4) — ver `config.py`
+- [x] Bandeja mezclada: filtro por "Nombre Del Flujo" (sección 5)
+- [ ] ~~Macros / `MAPEO`~~ → obsoleto; en su lugar, formularios de SAP (PENDIENTES.md, P3)
+- [ ] Plantilla oficial + Word de proceso por cada tipo y acción (sección 7)
 - [ ] IDs de prueba reales (sección 7)
 - [ ] Descarga de archivos permitida en el PC (sección 7)
 - [ ] `.exe` generado con `build.bat` (sección 8)

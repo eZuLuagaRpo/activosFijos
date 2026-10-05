@@ -126,16 +126,7 @@ class BaseValidador:
         if resultado.errores_plantilla:
             return resultado
 
-        # Filas de datos: desde la fila 2, ignorando las totalmente vacías.
-        # Solo cuentan las columnas de la plantilla: una nota fuera del rango
-        # (ej. en AD) no convierte la fila en un activo.
-        for numero, valores in enumerate(filas[1:], start=2):
-            fila = {
-                col.letra: (valores[indice] if indice < len(valores) else None)
-                for col, indice in posiciones.items()
-            }
-            if all(es_vacia(v) for v in fila.values()):
-                continue
+        for numero, fila in self._filas_de_datos(filas, posiciones):
             resultado.filas.append(self._validar_fila(numero, fila))
 
         # V3 · Debe existir al menos una fila de datos.
@@ -144,6 +135,39 @@ class BaseValidador:
                 "La plantilla no tiene filas de datos (desde la fila 2)."
             )
         return resultado
+
+    def leer_filas(self, ruta_excel):
+        """
+        Devuelve las filas de datos como [(numero_fila, {letra_oficial: valor})],
+        con la MISMA lógica de la validación (columnas por encabezado, filas
+        vacías ignoradas). La usa el Flujo 3 para llenar los formularios de SAP
+        con exactamente lo que se validó.
+
+        Raises:
+            ValidacionError: si no se puede abrir o faltan encabezados.
+        """
+        filas = self._leer_primera_hoja(ruta_excel, accion="Leyendo filas de")
+        resultado = ResultadoValidacion(archivo=ruta_excel, plantilla=self.nombre)
+        posiciones = self._ubicar_columnas(filas[0] if filas else (), resultado)
+        if resultado.errores_plantilla:
+            raise ValidacionError("; ".join(resultado.errores_plantilla))
+        return list(self._filas_de_datos(filas, posiciones))
+
+    @staticmethod
+    def _filas_de_datos(filas, posiciones):
+        """
+        Filas de datos: desde la fila 2, ignorando las totalmente vacías. Solo
+        cuentan las columnas de la plantilla: una nota fuera del rango (ej. en
+        AD) no convierte la fila en un activo.
+        """
+        for numero, valores in enumerate(filas[1:], start=2):
+            fila = {
+                col.letra: (valores[indice] if indice < len(valores) else None)
+                for col, indice in posiciones.items()
+            }
+            if all(es_vacia(v) for v in fila.values()):
+                continue
+            yield numero, fila
 
     # -- Reglas propias de cada plantilla (se sobreescribe) -------------------
     def reglas_fila(self, fila, resultado_fila):
@@ -162,7 +186,7 @@ class BaseValidador:
         """Texto para mensajes: 'F (Número de Inventario)'."""
         return f"{letra} ({self.columna(letra).campo})"
 
-    def _leer_primera_hoja(self, ruta_excel):
+    def _leer_primera_hoja(self, ruta_excel, accion="Validando"):
         """Devuelve todas las filas de la primera hoja como tuplas de valores."""
         try:
             # data_only: si alguna celda trae fórmula, se toma el valor calculado.
@@ -177,7 +201,8 @@ class BaseValidador:
             hoja.reset_dimensions()
             if self.logger:
                 self.logger.info(
-                    "Validando '%s' (hoja '%s') contra la plantilla %s.",
+                    "%s '%s' (hoja '%s') con la plantilla %s.",
+                    accion,
                     os.path.basename(ruta_excel),
                     hoja.title,
                     self.nombre,

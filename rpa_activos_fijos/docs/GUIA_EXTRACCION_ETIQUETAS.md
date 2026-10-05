@@ -172,6 +172,11 @@ Con esa información completo en `config.py`:
 
 > 📌 Esto **no incluye** todavía el mapeo de columnas Appian → macro SAP (los
 > Excel adjuntos); eso quedó pendiente para otro momento, según lo hablado.
+>
+> ✅ **Actualización 2026-10-04:** todo lo de esta guía ya se capturó y está
+> en `config.py`. El "mapeo a macro SAP" quedó obsoleto: no hay transformación
+> ni carga masiva; el bot llena los formularios de AS01 / AS02 / AS06 activo
+> por activo (ver [PENDIENTES.md](PENDIENTES.md)).
 
 ---
 

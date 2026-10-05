@@ -9,9 +9,16 @@
 > deja una línea en el Changelog de ESTADO_PROYECTO.md. Si aparece algo
 > nuevo, se agrega aquí.
 >
-> Alcance actual: **Activos BRP – Creación** (carga masiva). Los demás
-> activos/acciones se trabajan después, uno por uno.
-> Última actualización: 2026-09-29.
+> Alcance actual: **Activos BRP – Creación** (AS01, activo por activo). Los
+> demás activos/acciones se trabajan después, uno por uno.
+> Última actualización: 2026-10-05 (formulario AS01 configurado + supervisión con "Continuar").
+
+> **Renumeración 2026-10-04** (por el cambio de masiva → AS01/AS02/AS06):
+> P1 se mantiene · P2 (copia sin AC) y P3/P4 (Ejecutar y cuadro de la
+> masiva) quedaron **obsoletos** · nuevos P3–P5 (formulario AS01, supervisión,
+> resultado por fila) · P6 (AS02 en creación) **obsoleto** · bitácora P7 → P6 ·
+> orden P8 → P7 · respuesta P9 → P8 · plantilla inválida P10 → P9 ·
+> paginación P12 → P10 · nuevo P11 (otras acciones BRP) · varios → P12.
 
 ---
 
@@ -19,196 +26,148 @@
 
 ```
 APPIAN (preparación, todas las solicitudes)
-  1. Leer bandeja → descargar TODOS los Excel → validar TODOS (con AC) ✅ P1 (hoy caso por caso, ver P8)
-     (inválidos → responder en Appian de una vez)                         🔲 P10
+  1. Leer bandeja → descargar TODOS los Excel → validar TODOS            ✅ (hoy caso por caso, ver P7)
+     (bandeja paginada: hoy solo la página visible)                        🔲 P10
+     (inválidos → responder en Appian de una vez)                          🔲 P9
 
-POR CADA SOLICITUD VÁLIDA (uno por uno, por vencimiento)
-  2. Copia para SAP SIN la columna extra → carga_sap/CREAR (BRP).xlsm   ✅ P2
-  3. SAP Z_AM_MASIVA: crear masivo → ruta → "Ejecución de test"         ✅ etapa 1
-  4. Clic en Ejecutar                                                    🔲 P3 (DE ÚLTIMO)
-  5. Leer/exportar resultado → código SAP por activo (o error)           🔲 P3, P4
-  6. Excel del usuario + columna "Código SAP"                            🔲 P5
-  7. AS02 activo por activo: escribir la columna extra y guardar         🔲 P6
-  8. Responder en Appian (Exitoso / No Exitoso + comentario + Excel)     🔲 P9
-  Registro de estado por solicitud y por activo durante todo el proceso  🔲 P7
+POR CADA SOLICITUD VÁLIDA (una por una, por vencimiento)
+  POR CADA FILA DEL EXCEL (= un activo):
+    2. SAP AS01: llenar el formulario con los valores de la fila         ✅ P3 (faltan 3 dudas)
+    3. Guardar (solo si guardar_permitido()); si no → "Continuar"          ✅ P4
+    4. Leer el mensaje de SAP → código o error en "Código SAP"           ✅ código · 🔲 XPath del mensaje (P5)
+       (si falla, se anota y se CONTINÚA con la siguiente fila)
+  5. Responder en Appian (Exitoso / No Exitoso + comentario + Excel)     🔲 P8
+  Bitácora por solicitud y POR FILA durante todo el proceso               🔲 P6
 ```
 
-Interruptores en `config.py` (todos en `False` hasta que se decida
-explícitamente; explicados en GUIA_MODO_PRUEBAS.md, sección 3):
-`MODO_PRUEBAS_REEMPLAZO`, `SAP_EJECUTAR_REAL`, `SAP_MODIFICAR_REAL` (P6) y
-`APPIAN_RESPONDER_REAL`.
+Interruptores en `config.py` (explicados en GUIA_MODO_PRUEBAS.md, sección 3):
+`MODO_PRUEBAS_REEMPLAZO`, `MODO_PRUEBAS_SOLO_SAP` (sin Appian, 2026-10-05),
+`SAP_GUARDAR_REAL` y `APPIAN_RESPONDER_REAL`, todos en `False`. En cualquier
+modo de prueba, guardar en SAP está prohibido siempre.
 
-**Prioridad acordada:** la bitácora / registro de estado (P7) es
-importante para el usuario → construirla antes de activar Ejecutar o AS02.
-
----
-
-## P1 — Plantilla nueva de BRP – Creación (columna extra AC) ✅ 2026-09-29
-
-> **Resuelto:** AC validada como informativa, > 50 caracteres = ERROR;
-> plantilla sin AC se rechaza (encabezado faltante). Fila 3 sobrante de la
-> plantilla nueva borrada (confirmado por el usuario). Pruebas en
-> `tests/test_validacion_brp_creacion.py`. Lo de abajo queda como contexto.
-
-**Contexto (2026-09-29):** la plantilla que carga SAP (A..AB) no trae el
-campo "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" y SAP no acepta
-columnas adicionales. Por eso el usuario enviará la plantilla de siempre +
-**una columna extra al final**, que el bot usa después en AS02 (P6).
-
-**Definido:**
-- Plantilla oficial nueva: `plantillas/BRP/Plantilla Creación Activos BRP usuario.xlsm`
-  (hoja "FORMATO", 29 columnas A..AC, con macros).
-- Columna **AC**, encabezado exacto: `TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)`.
-- Clasificación: **informativa** (puede venir vacía), **máximo 50
-  caracteres**. Si se excede → definir si advertencia o error (ver abajo).
-- La columna **S "ACREEDOR" es OTRO campo**: se deja igual (informativa).
-  No confundir aunque el Word la describa parecido.
-- Obligatorios y demás reglas V1–V5: sin cambios (fuente de verdad = Word
-  por nombre de campo).
-
-**Decisiones tomadas (2026-09-29):**
-- Fila 3 con valores sueltos en la plantilla nueva → eran restos: se
-  borraron del archivo (edición puntual de esa fila; macros y comentarios
-  intactos).
-- Largo > 50 en AC → **ERROR** (invalida la fila).
-- El usuario SIEMPRE envía la plantilla con AC → una plantilla sin la
-  columna AC se rechaza por encabezado faltante (V3).
-- Si AC está vacía en una fila: se asume que ese activo **no** pasa por
-  AS02 (confirmar al construir P6).
+**Prioridad acordada:** la bitácora (P6) es importante para el usuario →
+construirla antes de encender `SAP_GUARDAR_REAL`.
 
 ---
 
-## P2 — Copia para SAP sin la columna extra ✅ 2026-09-29
+## P1 — Plantilla de BRP – Creación con columna AC ✅ 2026-09-29
 
-**Hecho:** `flujo3_sap.preparar_archivo_sap()` copia el Excel como
-`carga_sap/CREAR (BRP).xlsm` y le quita las columnas de
-`COLUMNAS_QUITAR_ANTES_DE_SAP` (config.py), ubicadas por **encabezado**.
-Conserva macros. Si falla, borra la copia a medias. El Excel del usuario NO
-se toca (conserva AC para P6 y la respuesta). Prueba automática: la copia
-queda con los MISMOS encabezados que `plantillas/BRP/Plantilla Creación
-Activos BRP.xlsm` (la de SAP).
-
-**Por vigilar / decidir:**
-- 1ª prueba real: openpyxl re-escribe el archivo; confirmar que SAP lo lee
-  igual que el original (valores, macros, formato).
-- ✅ Decidido (2026-09-29, opción b): todo lo que esté **a la derecha de
-  AC** (ej. notas en AD, AE) se QUITA de la copia para SAP
-  (`ULTIMA_COLUMNA_PLANTILLA` en config.py) y se deja un aviso en el log.
-  El Excel del usuario lo conserva; la validación ya lo ignoraba.
+- Plantilla del usuario: `plantillas/BRP/Plantilla Creación Activos BRP usuario.xlsm`
+  (hoja "FORMATO", A..AC). Se sigue usando IGUAL tras el cambio de negocio.
+- AC "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)": informativa, > 50
+  caracteres = ERROR; una plantilla sin AC se rechaza. Desde 2026-10-04 su
+  valor se escribe en el campo del mismo nombre de **AS01** (AS01 lo tiene).
+- La columna S "ACREEDOR" es OTRO campo.
+- Formatos aceptados: **.xlsx y .xlsm** (2026-10-04).
+- `plantillas/BRP/Plantilla Creación Activos BRP.xlsm` (A..AB) era el
+  formato de la masiva: ya no lo usa el bot ni las pruebas.
 
 ---
 
-## P3 — SAP etapa 2: Ejecutar + cuadro de resultados 🔲 (DE ÚLTIMO)
+## P2 — (OBSOLETO) Copia para SAP sin la columna AC
 
-**Hecho (etapa 1):** entra a SAP, `/nZ_AM_MASIVA`, crear masivo, pega la
-ruta, clic en "Ejecución de test", se detiene (`SAP_EJECUTAR_REAL = False`)
-y pausa `SAP_PAUSA_REVISION_SEG`.
-
-**Falta (insumos del usuario tras la prueba supervisada):**
-- XPath del botón **Ejecutar** (`SAP_XPATH_BOTON_EJECUTAR`, hoy vacío).
-- Cómo se ve el **cuadro de resultados**: XPath de la tabla/filas y del
-  mensaje por activo; si se lee en pantalla o hay que **exportarlo** a
-  Excel (el Word dice "exportar"; en SAP web la exportación descarga un
-  archivo → definir botón y formato).
-- Ejemplos reales de mensajes de **éxito** y de **error** por fila.
-- Confirmar en la prueba: IDs del **login** de SAP (hoy estándar, por
-  confirmar) y cómo queda **"Ejecución de test"** tras el clic.
-- Al terminar: borrar la copia de `carga_sap/`.
+Retirado el 2026-10-04: SAP ya no recibe el archivo (no hay masiva).
 
 ---
 
-## P4 — Extraer código SAP y asociarlo a cada fila 🔲
+## P3 — Formulario de AS01 por configuración ✅ 2026-10-05 (quedan formatos y casilla por confirmar)
 
-**Definido (Word 1.5):** mensaje "Se ha creado el activo fijo
-**00000512313** Subnumero 0000" → código **512313** (sin ceros a la
-izquierda, sin subnúmero).
+**Hecho:** `SAP_FORMULARIO_AS01_BRP` en `config.py` (XPath entregados por el
+usuario, 2026-10-05) y `SAP_FORMULARIOS_POR_CASO`. Pasos: pantalla inicial
+(A clase, B sociedad, C cantidad) → Enter → formulario completo (D, AC, F,
+G) → 4 pestañas más con doble clic lento (H, I, J, K, L, M, casilla N · O,
+P, Q, R · S, T, U, V · W, X). Celdas vacías no se tocan; la casilla N solo
+se marca si trae valor. `SAP_ESPERA_ENTRE_CLICS_SEG = 2` (SAP es lento).
+Las filas se leen con `BaseValidador.leer_filas()` (misma lógica que la
+validación). Pruebas: `tests/test_sap_as01.py`.
 
-**Por definir:**
-- **Cómo se asocia cada mensaje a su fila** del Excel: ¿mismo orden que
-  la plantilla? ¿el mensaje trae número de fila / inventario /
-  denominación? (clave para no poner un código en la fila equivocada).
-- Qué pasa si una fila da **error** en SAP: qué se escribe en su celda
-  "Código SAP" (¿el texto del error?) y cómo afecta la respuesta (P9).
-  SAP da el error **por fila**.
+**Resuelto (usuario, 2026-10-05):** solo se llenan los campos de los XPath
+entregados. Columnas del Excel sin XPath (**E** Marca, **Y** Número de
+contrato, **Z** Área de valoración, **AA** Duración, **AB** Periodo) se
+IGNORAN. Campos de AS01 sin columna ("Cantidad", "Total depreciados") NO se
+llenan. Celda vacía → ese campo no se toca y se sigue con el siguiente.
 
----
-
-## P5 — Columna "Código SAP" en el Excel del usuario 🔲
-
-**Definido:** se agrega una columna **"Código SAP"** al Excel que envió el
-usuario (con su columna AC) y ese es el archivo que se le devuelve.
-
-**Por definir:** posición (se asume **al final**, después de AC) y cómo se
-escribe una fila con error (P4). Se guarda como archivo aparte (ej.
-`salidas/PDA-7889_brp_creacion_RESPUESTA.xlsm`); el original no se modifica.
-
----
-
-## P6 — Modificación en AS02, activo por activo 🔲
-
-**Definido (2026-09-29):** por cada activo creado:
-1. Barra de transacción → `/nAS02`.
-2. **Activo fijo** `//*[@id="M0:46:::2:21-r"]` = Código SAP de esa fila.
-3. **Sociedad** `//*[@id="M0:46:::4:21"]` = columna **B** de esa fila.
-4. **Enter** → entra al activo (el campo está en la pantalla que abre, no
-   hay que cambiar de pestaña).
-5. Campo `//*[@id="M0:46:3:1:2B256:1::3:22"]`: **borrar lo que tenga** y
-   escribir el valor de la columna **AC** de esa fila.
-6. **Guardar**: botón `//*[@id="M0:36::btn[11]"]` (btn[11] = Guardar
-   estándar de SAP); `Ctrl+S` como respaldo.
-
-**Seguridad:** AS02 + Guardar **modifica activos reales** → interruptor
-propio `SAP_MODIFICAR_REAL = False` (llena todo y no guarda). Ventaja: se
-puede probar por separado sobre un activo YA existente, sin crear nada.
-
-**Ya en `config.py` (2026-09-29):** `SAP_AS02_XPATH_ACTIVO_FIJO`,
-`SAP_AS02_XPATH_SOCIEDAD`, `SAP_AS02_XPATH_TXT_ACREEDOR`,
-`SAP_XPATH_BOTON_GUARDAR` y `SAP_MODIFICAR_REAL = False`. Falta el
-recorrido (código) y lo de abajo.
-
-**Por definir (el usuario lo trae):**
-- Cómo confirma SAP que guardó: texto y XPath del mensaje de la barra de
-  estado (ej. "Se ha modificado el activo fijo …").
-- Qué hacer si falla la modificación de un activo (el activo ya existe):
-  ¿reintento?, ¿se reporta en la columna?, ¿respuesta No Exitoso?
-- Si AC viene vacía: se asume que se salta AS02 para ese activo (P1).
+**Dudas abiertas (el usuario):**
+3. Formatos: fecha G se escribe `05.10.2026` (`SAP_FORMATO_FECHA`) y
+   decimales con coma (`SAP_SEPARADOR_DECIMAL`) — **por confirmar** en la
+   1ª prueba. Ojo con códigos con ceros a la izquierda guardados como número
+   en Excel (ej. centro de coste `0012345` → Excel lo guarda `12345`).
+4. Casilla N "Activo fijo paralizado": se asume que viene desmarcada por
+   defecto y que "cualquier valor" en la celda = marcarla. Confirmar.
 
 ---
 
-## P7 — Registro de estado por solicitud y por activo 🔲
+## P4 — Supervisión: detenerse antes de Guardar + botón "Continuar" ✅ 2026-10-05
 
-**Por qué es indispensable:** crear (Ejecutar) y modificar (AS02) cambian
-datos REALES. Si el bot se cae a mitad de camino, al volver a correr NO
-puede repetir lo ya hecho (crearía activos duplicados) y debe retomar
-exactamente donde quedó.
+- `flujo3_sap.guardar_permitido()`: solo True con `SAP_GUARDAR_REAL = True`
+  **y** fuera de MODO PRUEBAS. Además, nunca se guarda si
+  `SAP_XPATH_MENSAJE_ESTADO` está vacío (no se podría confirmar el resultado).
+- Si no se puede guardar: por cada activo el bot llena el formulario, se
+  detiene, la ventana del bot habilita **"Continuar (sin guardar)"** (aviso
+  por la cola; el hilo del bot espera un `threading.Event`) y al presionarlo
+  sale SIN guardar: Atrás ×2 (lento) + confirmar
+  (`SAP_XPATH_BOTON_ATRAS`, `SAP_XPATH_CONFIRMAR_SALIR_SIN_GUARDAR`).
+- Tras un ERROR en una fila NO se presiona Atrás (fuera del formulario podría
+  llevar al menú o a cerrar sesión): solo se confirma la ventana de "salir
+  sin guardar" si quedó abierta; la siguiente fila arranca con `/nAS01`.
 
-**Diseño acordado:** un archivo en disco (JSON) con una ficha por
-solicitud (llave = número de solicitud) y, dentro, el avance de cada
-activo:
+---
+
+## P5 — Resultado por fila → columna "Código SAP" 🔲 (código listo, falta el XPath)
+
+**Hecho:**
+- Guardar → leer la barra → `SAP_REGEX_ACTIVO_CREADO`: "El act.fj.
+  **7129560** 0 se ha creado" → **7129560**. Si no coincide → `ERROR: <mensaje
+  de SAP>`. Errores al llenar → `ERROR: ...` (con el mensaje de la barra si se
+  puede leer). Siempre se CONTINÚA con la siguiente fila.
+- `escribir_columna_codigo_sap()`: agrega "Código SAP" en la primera columna
+  libre a la derecha (con la plantilla = **AD**) del Excel del usuario y lo
+  guarda APARTE en `salidas/<archivo>_RESPUESTA.<ext>`; el original no se
+  modifica. Solo se genera cuando se guarda de verdad.
+
+**Falta (el usuario):**
+- **XPath de la barra de mensajes** de SAP → `SAP_XPATH_MENSAJE_ESTADO`.
+  Mientras esté vacío, el bot NO guarda.
+- **Texto exacto de un mensaje de error** de AS01 (para confirmar que no se
+  confunda con éxito).
+
+---
+
+## P6 — Bitácora de estado por solicitud y POR FILA 🔲 (PRIORITARIA)
+
+**Por qué es indispensable:** cada "Guardar" en AS01 crea un activo REAL.
+Si el bot se cae a mitad, al volver NO puede repetir filas ya creadas
+(duplicados) y debe seguir exactamente donde quedó.
+
+**Diseño:** archivo en disco (JSON), una ficha por solicitud (llave =
+número de solicitud) y, dentro, cada fila:
 
 ```
 PDA-7889: url, excel, estado = descargado → validado/invalido →
-          creado_en_sap → modificado → respondido
-  activos: fila 2 → código 512313, AS02 = hecho
-           fila 3 → código 512314, AS02 = pendiente
+          en_sap → respondido
+  fila 2 → creado, código 512313
+  fila 3 → error SAP: "Centro de coste no existe"
+  fila 4 → guardando…   ← se cayó aquí
 ```
 
-Cada paso se anota **apenas ocurre** (antes de pasar al siguiente). Al
-iniciar, el bot lee el registro: si una solicitud ya fue creada en SAP, NO
-vuelve a ejecutar la masiva; solo termina las AS02 pendientes y responde.
+- Cada paso se anota **apenas ocurre**. Antes de presionar Guardar se marca
+  la fila como "guardando".
+- Al reanudar: filas "creado"/"error" no se repiten; si una fila quedó en
+  **"guardando"** (se cayó entre el clic y la respuesta) NO se reintenta
+  sola → se marca para **revisión manual** (reintentar podría duplicar).
 
 ---
 
-## P8 — Orden de ejecución acordado (preparar todo → uno por uno) 🔲
+## P7 — Orden de ejecución acordado (preparar todo → uno por uno) 🔲
 
 **Acordado (2026-09-27):** (1) leer bandeja, descargar y validar TODAS;
 (2) solo las válidas, una por una: SAP → respuesta. Hoy el orquestador
 procesa cada solicitud de punta a punta antes de pasar a la siguiente.
-Se reorganiza junto con P7.
+Se reorganiza junto con P6.
 
 ---
 
-## P9 — Respuesta en Appian 🔲
+## P8 — Respuesta en Appian 🔲
 
 **Hecho:** selectores capturados en `config.py` (`RESPUESTA_*`) e
 interruptor `APPIAN_RESPONDER_REAL = False`. Decisión: usar la librería
@@ -222,14 +181,14 @@ librería NO sirve tal cual (siempre finaliza, ignora el interruptor).
   modal ("Atender solicitud"), etiqueta de "¿Cómo deseas finalizar esta
   solicitud?", etiqueta del comentario, etiqueta/botón de adjuntos, botón
   Finalizar; y si aparece "Tomar tarea".
-- **Lógica Exitoso / No Exitoso** (Word 1.6 da la base; falta el caso
-  parcial: unos activos creados y otros con error, o AS02 fallida).
+- **Lógica Exitoso / No Exitoso**: según el Word (1.6), si SAP rechaza una o
+  más filas → "Finalizado No Exitoso". Confirmar.
 - **Texto parametrizado del comentario** (éxito y no éxito).
-- Qué se adjunta en cada caso (en éxito: Excel con "Código SAP").
+- Adjunto: Excel del usuario con la columna "Código SAP".
 
 ---
 
-## P10 — Respuesta cuando la plantilla es inválida 🔲
+## P9 — Respuesta cuando la plantilla es inválida 🔲
 
 **Pendiente del usuario funcional:** si al usuario se le devuelven las
 observaciones por fila (ej. columna "Observaciones" o en el comentario).
@@ -237,7 +196,7 @@ Hoy el caso queda FALLIDO con el detalle por fila en el log.
 
 ---
 
-## P12 — Paginación de la Bandeja de Actividades 🔲 (IMPORTANTE)
+## P10 — Paginación de la Bandeja de Actividades 🔲 (IMPORTANTE)
 
 **Hallazgo (2026-09-29):** la bandeja de Appian es paginada (ej. 10 por
 página). `bandeja_reader.listar_pendientes()` solo lee las filas de la
@@ -273,17 +232,32 @@ ve cuando no hay más páginas.
 
 ---
 
-## P11 — Varios / mantenimiento 🔲
+## P11 — Otras acciones de BRP: Modificar (AS02) y Borrar (AS06) 🔲
 
-- Actualizar `GUIA_MODO_PRUEBAS.md` con cada etapa nueva (AS02, respuesta).
+- Cada una tendrá **su propia plantilla** (distinta a la de creación) y su
+  Word de proceso → nuevo validador en `validacion/plantillas/` + su
+  formulario por configuración (mismo mecanismo de P3).
+- AS02: en `config.py` quedan como **referencia** los selectores capturados
+  el 2026-09-29 (`SAP_AS02_XPATH_ACTIVO_FIJO`, `SAP_AS02_XPATH_SOCIEDAD`,
+  `SAP_AS02_XPATH_TXT_ACREEDOR`). Revisarlos con la plantilla de modificar.
+
+---
+
+## P12 — Varios / mantenimiento 🔲
+
+- Actualizar `GUIA_MODO_PRUEBAS.md` con cada etapa nueva (AS01, "Continuar",
+  respuesta).
 - Selector de la bandeja `//*[@id="sitesBody"]/div/div/div[6]/…` es casi
   un XPath completo (frágil): primer sospechoso si la bandeja falla.
 - `DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO` usa un ID de Appian inestable
   (no se ha necesitado).
 - Caso "2 adjuntos": existe para OTRO activo (se verá después); en BRP
   Creación siempre es 1.
-- Commit completo pendiente (el commit `7baf3e8` quedó parcial; lo hace el
-  usuario).
+- Login de SAP con IDs estándar: confirmar en la 1ª prueba real.
+- `console_view._correr_bot` (código previo) llama `self.after()` desde el
+  hilo del bot al terminar. Funciona con la ventana en `mainloop`, pero lo
+  robusto es avisar por la cola (como se hizo con "Continuar"). Revisar si
+  algún día la ventana no se actualiza al terminar.
 
 ---
 
@@ -292,4 +266,4 @@ ve cuando no hay más páginas.
 **No la usa el bot en producción** (no va en el `.exe`: `build.bat` no la
 incluye). Sirve para: (1) referencia de negocio (plantillas oficiales y
 Word de proceso de cada activo) y (2) las **pruebas automáticas**
-(`tests/`), que parten de la plantilla oficial. Debe quedarse en el repo.
+(`tests/`), que parten de la plantilla del usuario. Debe quedarse en el repo.

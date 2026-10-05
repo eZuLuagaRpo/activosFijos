@@ -24,9 +24,8 @@ CARPETA_BRP = os.path.join(
     "plantillas",
     "BRP",
 )
-# La que envía el USUARIO (A..AC) y la que recibe SAP en la masiva (A..AB).
+# La plantilla que envía el USUARIO (A..AC).
 PLANTILLA = os.path.join(CARPETA_BRP, "Plantilla Creación Activos BRP usuario.xlsm")
-PLANTILLA_SAP = os.path.join(CARPETA_BRP, "Plantilla Creación Activos BRP.xlsm")
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(PLANTILLA), reason="No está la plantilla oficial de BRP"
@@ -115,16 +114,13 @@ def test_celdas_fuera_de_a_ab_no_crean_filas(tmp_path):
     assert [f.fila for f in r.filas] == [2]
 
 
-def test_xlsx_se_rechaza_porque_sap_exige_xlsm(tmp_path):
-    # SAP carga la plantilla como "CREAR (BRP).xlsm": un .xlsx (aunque tenga
-    # datos correctos) no sirve.
+def test_xlsx_sin_macros_tambien_se_valida(tmp_path):
+    # Desde 2026-10-04 SAP no recibe el archivo: se acepta .xlsx y .xlsm.
     ruta = crear_excel(tmp_path, [fila_valida()], nombre="caso.xlsm")
     libro = load_workbook(ruta)
     ruta_xlsx = str(tmp_path / "caso.xlsx")
     libro.save(ruta_xlsx)
-    r = validar(ruta_xlsx)
-    assert not r.valida
-    assert "debe ser .xlsm" in r.errores_plantilla[0]
+    assert validar(ruta_xlsx).valida
 
 
 # -- V1 · Obligatorios ---------------------------------------------------------
@@ -194,7 +190,7 @@ def test_formato_no_soportado(tmp_path):
     ruta.write_bytes(b"")
     r = validar(str(ruta))
     assert not r.valida
-    assert "no soportado" in r.errores_plantilla[0]
+    assert "debe ser .xlsx o .xlsm" in r.errores_plantilla[0]
 
 
 # -- V4 · Vehículos ------------------------------------------------------------
@@ -238,13 +234,12 @@ def test_ac_con_mas_de_50_caracteres_es_error(tmp_path):
 
 def test_plantilla_sin_columna_ac_se_rechaza(tmp_path):
     # La plantilla de SAP (A..AB) no sirve como plantilla del usuario: le falta AC.
-    destino = tmp_path / "sin_ac.xlsm"
-    shutil.copy(PLANTILLA_SAP, destino)
+    # Se parte de la plantilla del usuario y se le borra la columna AC.
+    destino = crear_excel(tmp_path, [fila_valida()], nombre="sin_ac.xlsm")
     libro = load_workbook(destino, keep_vba=True)
-    for letra, valor in fila_valida().items():
-        libro.worksheets[0][f"{letra}2"] = valor
+    libro.worksheets[0].delete_cols(29)   # AC
     libro.save(destino)
-    r = validar(str(destino))
+    r = validar(destino)
     assert not r.valida
     assert "AC 'TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)'" in r.errores_plantilla[0]
 

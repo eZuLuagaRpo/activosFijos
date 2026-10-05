@@ -1,9 +1,10 @@
 """
-Pruebas de SAP etapa 1 (hasta antes de "Ejecutar"), con un NAVEGADOR FALSO.
+Pruebas de SAP con un NAVEGADOR FALSO.
 
 No hay SAP de pruebas, así que se simula el navegador: pestañas, pantalla de
-login, barra de transacción e iframes. Se verifica QUÉ hace el bot y en QUÉ
-ORDEN, y sobre todo que NUNCA llegue a ejecutar.
+login, barra de transacción e iframes. Se verifica la base de SAP
+(sap/sap_webgui.py), las reglas de seguridad de "Guardar" y que el Flujo 3
+no entre a SAP mientras el formulario de AS01 no esté configurado.
 """
 
 import logging
@@ -24,9 +25,7 @@ BARRA = config.SAP_XPATH_BARRA_TRANSACCION[0]
 USUARIO = config.SAP_XPATH_LOGIN_USUARIO[0]
 CLAVE = config.SAP_XPATH_LOGIN_CLAVE[0]
 BOTON_LOGIN = config.SAP_XPATH_LOGIN_BOTON[0]
-OPCION_CREAR = config.SAP_MASIVA_XPATH_OPCION_ACCION["creacion"][0]
-CAMPO_RUTA = config.SAP_MASIVA_XPATH_CAMPO_RUTA[0]
-EJECUCION_TEST = config.SAP_MASIVA_XPATH_EJECUCION_TEST[0]
+CAMPO = '//*[@id="CAMPO-DE-PRUEBA"]'
 
 
 # -- Navegador falso -------------------------------------------------------------
@@ -69,6 +68,10 @@ class FakeSwitch:
     def default_content(self):
         self.n.frame = None
 
+    @property
+    def active_element(self):
+        return FakeElement(self.n, "foco")
+
     def frame(self, frame):
         self.n.frame = frame
 
@@ -106,9 +109,7 @@ class FakeBrowser:
     def _mostrar_sap(self):
         pantalla = {
             BARRA: FakeElement(self, "barra"),
-            OPCION_CREAR: FakeElement(self, "opcion_crear"),
-            CAMPO_RUTA: FakeElement(self, "campo_ruta"),
-            EJECUCION_TEST: FakeElement(self, "ejecucion_test"),
+            CAMPO: FakeElement(self, "campo"),
         }
         if self.barra_en_iframe:
             self.pagina_sap, self.pagina_iframe = {}, pantalla
@@ -127,27 +128,13 @@ class FakeBrowser:
 @pytest.fixture(autouse=True)
 def rapido(monkeypatch):
     monkeypatch.setattr(sap_webgui, "TIMEOUT", 1)
-    monkeypatch.setattr(flujo3_sap, "SAP_PAUSA_REVISION_SEG", 0)
-    # Aquí se prueba la navegación en SAP (con archivos de mentira); quitar la
-    # columna AC se prueba en test_flujo3_archivo_sap.py con Excel reales.
-    monkeypatch.setattr(flujo3_sap, "COLUMNAS_QUITAR_ANTES_DE_SAP", {})
-    monkeypatch.setattr(flujo3_sap, "ULTIMA_COLUMNA_PLANTILLA", {})
 
 
 def sap_con(navegador, logger=None):
     return SapWebGui(navegador, "usuario@bancolombia.com.co", "Secreta123", logger=logger)
 
 
-def solicitud(tmp_path, monkeypatch, tipo="brp", accion="creacion"):
-    carpeta = tmp_path / "carga_sap"
-    carpeta.mkdir(exist_ok=True)
-    monkeypatch.setattr(flujo3_sap, "CARGA_SAP_DIR", str(carpeta))
-    excel = tmp_path / f"PDA-7889_{tipo}_{accion}.xlsm"
-    excel.write_bytes(b"plantilla")
-    return Solicitud(case_id="PDA-7889", tipo=tipo, accion=accion, excel_path=str(excel))
-
-
-# -- SapWebGui ---------------------------------------------------------------------
+# -- SapWebGui (base de SAP) -------------------------------------------------------
 
 def test_abre_pestana_nueva_e_inicia_sesion(caplog):
     navegador = FakeBrowser()
@@ -183,16 +170,24 @@ def test_transaccion_con_prefijo_n_y_enter():
     navegador = FakeBrowser(con_sso=True)
     sap = sap_con(navegador)
     sap.asegurar_sesion()
-    sap.ir_a_transaccion("Z_AM_MASIVA")
-    assert ("escribir", "barra", "/nZ_AM_MASIVA", True) in navegador.acciones
+    sap.ir_a_transaccion("AS01")
+    assert ("escribir", "barra", "/nAS01", True) in navegador.acciones
+
+
+def test_escribir_borra_y_escribe_en_el_campo():
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    sap.escribir([CAMPO], "valor", "un campo")
+    assert navegador.acciones[-2:] == [("clic", "campo"), ("escribir", "campo", "valor", False)]
 
 
 def test_encuentra_elementos_dentro_de_un_iframe():
     navegador = FakeBrowser(con_sso=True, barra_en_iframe=True)
     sap = sap_con(navegador)
     sap.asegurar_sesion()
-    sap.ir_a_transaccion("Z_AM_MASIVA")
-    assert ("escribir", "barra", "/nZ_AM_MASIVA", True) in navegador.acciones
+    sap.ir_a_transaccion("AS01")
+    assert ("escribir", "barra", "/nAS01", True) in navegador.acciones
 
 
 def test_volver_a_appian():
@@ -203,6 +198,33 @@ def test_volver_a_appian():
     assert navegador.actual == "appian"
 
 
+def test_enter_se_presiona_en_el_elemento_con_foco():
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    sap.enter()
+    assert navegador.acciones[-1] == ("escribir", "foco", "", True)
+
+
+def test_doble_clic_lento_espera_entre_clics(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(sap_webgui.time, "sleep", esperas.append)
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    sap.doble_clic_lento([CAMPO], "una pestaña", 2)
+    assert navegador.acciones[-2:] == [("clic", "campo"), ("clic", "campo")]
+    assert esperas == [2, 2]
+
+
+def test_existe_devuelve_none_si_no_aparece():
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    assert sap.existe(['//*[@id="NO-EXISTE"]'], 0) is None
+    assert sap.existe([CAMPO], 0) is not None
+
+
 def test_selector_que_no_aparece_da_error_claro():
     navegador = FakeBrowser(con_sso=True)
     sap = sap_con(navegador)
@@ -211,40 +233,46 @@ def test_selector_que_no_aparece_da_error_claro():
         sap.clic(['//*[@id="NO-EXISTE"]'], "un botón inexistente")
 
 
-# -- Flujo 3 · etapa 1 ---------------------------------------------------------------
+# -- Seguridad: cuándo se permite "Guardar" ----------------------------------------
 
-def test_etapa1_hace_los_pasos_en_orden_y_se_detiene(tmp_path, monkeypatch):
-    navegador = FakeBrowser()
-    sol = solicitud(tmp_path, monkeypatch)
+@pytest.mark.parametrize(
+    "guardar_real, modo_pruebas, permitido",
+    [
+        (False, False, False),   # interruptor apagado
+        (False, True, False),
+        (True, True, False),     # MODO PRUEBAS: prohibido aunque el interruptor esté encendido
+        (True, False, True),     # único caso en que se guarda
+    ],
+)
+def test_guardar_permitido(monkeypatch, guardar_real, modo_pruebas, permitido):
+    monkeypatch.setattr(flujo3_sap, "SAP_GUARDAR_REAL", guardar_real)
+    monkeypatch.setattr(flujo3_sap, "MODO_PRUEBAS_REEMPLAZO", modo_pruebas)
+    assert flujo3_sap.guardar_permitido() is permitido
+
+
+def test_por_defecto_guardar_esta_apagado():
+    assert config.SAP_GUARDAR_REAL is False
+    assert flujo3_sap.guardar_permitido() is False
+
+
+# -- Flujo 3 sin formulario configurado ----------------------------------------
+
+def test_flujo3_queda_pendiente_sin_entrar_a_sap(monkeypatch):
+    # Si una combinación no tiene formulario configurado, no se entra a SAP.
+    monkeypatch.setattr(flujo3_sap, "SAP_FORMULARIOS_POR_CASO", {})
+    navegador = FakeBrowser(con_sso=True)
+    sol = Solicitud(case_id="PDA-7889", tipo="brp", accion="creacion", excel_path="x.xlsm")
 
     paso = flujo3_sap.cargar_a_sap(sap_con(navegador), sol)
 
-    pasos = [a for a in navegador.acciones if a[0] in ("clic", "escribir")]
-    # (antes de escribir en un campo, el bot hace clic en él)
-    assert pasos[-6:] == [
-        ("clic", "barra"),
-        ("escribir", "barra", "/nZ_AM_MASIVA", True),
-        ("clic", "opcion_crear"),
-        ("clic", "campo_ruta"),
-        ("escribir", "campo_ruta", sol.archivo_sap, False),
-        ("clic", "ejecucion_test"),
-    ]
-    assert sol.archivo_sap.endswith("CREAR (BRP).xlsm")
-    assert "Detenido antes de Ejecutar" in paso
+    assert "Pendiente de SAP (AS01" in paso
+    assert navegador.pestanas == ["appian"]      # no abrió SAP
+    assert navegador.acciones == []
 
 
-def test_etapa1_con_ejecutar_real_no_ejecuta_nada(tmp_path, monkeypatch):
-    monkeypatch.setattr(flujo3_sap, "SAP_EJECUTAR_REAL", True)
+def test_combinacion_sin_transaccion_da_error_y_no_abre_sap():
     navegador = FakeBrowser(con_sso=True)
-    with pytest.raises(SapError, match="No se ejecutó nada"):
-        flujo3_sap.cargar_a_sap(sap_con(navegador), solicitud(tmp_path, monkeypatch))
-    # Lo último que tocó fue "Ejecución de test": nunca un botón de ejecutar.
-    assert [a for a in navegador.acciones if a[0] == "clic"][-1] == ("clic", "ejecucion_test")
-
-
-def test_combinacion_sin_transaccion_no_abre_sap(tmp_path, monkeypatch):
-    navegador = FakeBrowser(con_sso=True)
-    sol = solicitud(tmp_path, monkeypatch, tipo="prj")
+    sol = Solicitud(case_id="PDA-1", tipo="prj", accion="creacion", excel_path="x.xlsm")
     with pytest.raises(SapError, match="SAP_TRANSACCION_POR_CASO"):
         flujo3_sap.cargar_a_sap(sap_con(navegador), sol)
     assert navegador.pestanas == ["appian"]
@@ -259,7 +287,7 @@ def test_orquestador_vuelve_a_appian_aunque_sap_falle(monkeypatch):
         def volver_a_appian(self):
             SapFalso.vueltas += 1
 
-    def sap_que_falla(sap, sol, logger=None):
+    def sap_que_falla(sap, sol, logger=None, esperar_continuar=None):
         raise SapError("SAP no respondió")
 
     monkeypatch.setattr(orquestador.flujo1_appian, "obtener_solicitud",

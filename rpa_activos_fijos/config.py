@@ -16,12 +16,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 DOWNLOAD_TEST_DIR = os.path.join(BASE_DIR, "downloads_test")  # ver MODO PRUEBAS abajo
-CARGA_SAP_DIR = os.path.join(BASE_DIR, "carga_sap")  # ver NOMBRE_ARCHIVO_SAP abajo
 OUTPUT_DIR = os.path.join(BASE_DIR, "salidas")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
-for _carpeta in (DOWNLOAD_DIR, DOWNLOAD_TEST_DIR, CARGA_SAP_DIR, OUTPUT_DIR, LOG_DIR):
+for _carpeta in (DOWNLOAD_DIR, DOWNLOAD_TEST_DIR, OUTPUT_DIR, LOG_DIR):
     os.makedirs(_carpeta, exist_ok=True)
 
 
@@ -36,14 +35,37 @@ for _carpeta in (DOWNLOAD_DIR, DOWNLOAD_TEST_DIR, CARGA_SAP_DIR, OUTPUT_DIR, LOG
 #            descarga), pero el Excel que se valida y se lleva a SAP es el
 #            que TÚ dejaste en DOWNLOAD_TEST_DIR con el nombre EXACTO del
 #            número de la solicitud, ej:  downloads_test/PDA-7889.xlsm
-#            (BRP - Creación solo acepta .xlsm)
+#            (.xlsx o .xlsm)
 #            - Solicitudes SIN archivo en esa carpeta se OMITEN (ni se abren).
 #            - Tu archivo nunca se modifica: el bot trabaja sobre una copia
 #              en downloads/ llamada  PDA-7889_brp_creacion_PRUEBA.xlsm
 #            - El adjunto real de Appian se descarga igual y NO se borra.
+#            - En SAP, GUARDAR queda PROHIBIDO (aunque SAP_GUARDAR_REAL = True).
 #
 # ⚠️ Déjalo en False en el .exe que se entrega a la usuaria.
 MODO_PRUEBAS_REEMPLAZO = False
+
+
+# ---------------------------------------------------------------------------
+# MODO PRUEBAS — SOLO SAP (TEMPORAL)
+# ---------------------------------------------------------------------------
+# Para probar la validación + la transacción de SAP cuando NO hay
+# solicitudes en Appian (2026-10-05).
+#
+#   False -> normal.
+#   True  -> el bot NO entra a Appian. Abre el navegador, toma los Excel de
+#            DOWNLOAD_TEST_DIR nombrados  <lo_que_quieras>_<tipo>_<accion>.xlsx
+#            (o .xlsm), ej:  downloads_test/prueba1_brp_creacion.xlsx
+#            El final del nombre dice qué validación y qué formulario de SAP
+#            usar. Archivos con otro nombre se OMITEN.
+#            - Valida cada archivo y lo lleva a SAP fila por fila, con la
+#              misma supervisión ("Continuar (sin guardar)").
+#            - En SAP, GUARDAR queda PROHIBIDO (aunque SAP_GUARDAR_REAL = True).
+#            - Tu archivo nunca se modifica.
+#
+# No se puede encender a la vez que MODO_PRUEBAS_REEMPLAZO (el bot no arranca).
+# ⚠️ Déjalo en False en el .exe que se entrega a la usuaria.
+MODO_PRUEBAS_SOLO_SAP = False
 
 
 # ---------------------------------------------------------------------------
@@ -196,42 +218,14 @@ DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO = (
 
 
 # ---------------------------------------------------------------------------
-# SAP — NOMBRE EXACTO DEL ARCHIVO QUE SE CARGA
+# SAP — TRANSACCIONES INDIVIDUALES Y SELECTORES
 # ---------------------------------------------------------------------------
-# En la carga masiva, SAP exige que la plantilla se llame EXACTAMENTE así
-# (confirmado con la usuaria funcional, 2026-09-28; mayúsculas tal cual).
-# Los Excel se descargan como CASE_ID_tipo_accion.xlsm (para saber de qué
-# solicitud es cada uno) y, JUSTO ANTES de cargar a SAP, el bot hace una
-# COPIA temporal con este nombre en CARGA_SAP_DIR. Como SAP procesa una
-# solicitud a la vez, esa copia se reemplaza en cada caso. En SAP se busca
-# el archivo con el explorador, así que la carpeta no tiene que ser una fija.
-NOMBRE_ARCHIVO_SAP = {
-    (TIPO_BRP, ACCION_CREACION): "CREAR (BRP).xlsm",
-}
-
-# Columnas que trae la plantilla del USUARIO pero que SAP NO acepta en la
-# carga masiva: se QUITAN de la copia para SAP (el Excel del usuario las
-# conserva, porque se usan después y se le devuelven). Se ubican por
-# ENCABEZADO, no por letra.
-#   BRP - Creación: "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" (columna
-#   AC). SAP no la recibe en la masiva; su valor se escribe después, activo
-#   por activo, en AS02 (2026-09-29).
-COLUMNAS_QUITAR_ANTES_DE_SAP = {
-    (TIPO_BRP, ACCION_CREACION): ["TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)"],
-}
-
-# Última columna de la plantilla del USUARIO. Todo lo que esté a la derecha
-# (ej. notas que el usuario escribió en AD, AE...) se QUITA de la copia para
-# SAP, porque SAP espera exactamente sus columnas (decisión 2026-09-29). La
-# validación ya ignora esas celdas; el Excel del usuario las conserva.
-ULTIMA_COLUMNA_PLANTILLA = {
-    (TIPO_BRP, ACCION_CREACION): "AC",
-}
-
-
-# ---------------------------------------------------------------------------
-# SAP — TRANSACCIONES Y SELECTORES (capturados en SAP real, 2026-09-28)
-# ---------------------------------------------------------------------------
+# CAMBIO DE NEGOCIO (2026-10-04): NO se usa la carga masiva (Z_AM_MASIVA) ni
+# la modificación masiva. Los activos se crean / modifican / borran UNO POR
+# UNO con las transacciones AS01 / AS02 / AS06, llenando el formulario con los
+# valores de cada fila del Excel. SAP NO recibe el archivo: el Excel del
+# usuario solo se lee (y al final se le agrega la columna "Código SAP").
+#
 # SAP se usa en el NAVEGADOR (SAP GUI for HTML): se maneja con Selenium, igual
 # que Appian. Cada selector es una LISTA (principal -> respaldos), como en la
 # bandeja: si algún día cambia, se agrega una alternativa aquí sin tocar código.
@@ -254,70 +248,129 @@ SAP_XPATH_BARRA_TRANSACCION = [
     '//*[@id="ToolbarOkCode"]',
 ]
 
-# Códigos de transacción. Por ahora SOLO se usa la masiva (BRP va por masiva);
-# AS01 / AS02 / AS06 quedan registradas para cuando se configuren.
-SAP_TX_MASIVA = "Z_AM_MASIVA"      # crear / modificar / borrar masivo
-SAP_TX_CREAR = "AS01"              # pendiente de configurar
-SAP_TX_MODIFICAR = "AS02"          # pendiente de configurar
-SAP_TX_BORRAR = "AS06"             # pendiente de configurar
+# Códigos de transacción.
+SAP_TX_CREAR = "AS01"              # crear activo fijo
+SAP_TX_MODIFICAR = "AS02"          # modificar activo fijo
+SAP_TX_BORRAR = "AS06"             # borrar activo fijo
 
-# Qué transacción usa cada (tipo, acción). Solo lo que ya está configurado.
+# Qué transacción usa cada (tipo, acción).
+# BRP - Creación: solo AS01 (AS01 tiene el campo "TXT.NUM.PRAL.AF", así que la
+# columna AC se escribe al crear; ya NO hay paso por AS02).
 SAP_TRANSACCION_POR_CASO = {
-    (TIPO_BRP, ACCION_CREACION): SAP_TX_MASIVA,
+    (TIPO_BRP, ACCION_CREACION): SAP_TX_CREAR,
 }
 
-# --- Z_AM_MASIVA -------------------------------------------------------------
-# 1) Opción según la acción (crear / modificar / borrar masivo).
-SAP_MASIVA_XPATH_OPCION_ACCION = {
-    ACCION_CREACION: ['//*[@id="M0:46:::1:2-txt"]'],
-    ACCION_MODIFICACION: ['//*[@id="M0:46:::2:2-txt"]'],
-    ACCION_ELIMINACION: ['//*[@id="M0:46:::3:2-txt"]'],
+# --- Formularios (columna del Excel -> campo de SAP) ---------------------------
+# Cada formulario es una LISTA ORDENADA de pasos que el bot ejecuta, fila por
+# fila del Excel (capturado en SAP real, 2026-10-05):
+#   {"tipo": "campo", "columna": "A", "nombre": ..., "xpath": [...]}
+#        -> escribe el valor de esa columna (borra lo que tenga el campo).
+#           Si la celda viene VACÍA, el campo NO se toca (queda lo de SAP).
+#   {"tipo": "casilla", "columna": "N", ...}
+#        -> si la celda trae algo, hace UN clic en la casilla; si viene vacía,
+#           se deja quieta.
+#   {"tipo": "enter", "nombre": ...}       -> presiona Enter.
+#   {"tipo": "pestana", "nombre": ..., "xpath": [...]}
+#        -> cambia de pestaña con DOS clics separados por
+#           SAP_ESPERA_ENTRE_CLICS_SEG (uno solo no funciona; SAP es lento).
+# Agregar / corregir un campo = tocar una línea aquí, sin programar.
+
+# AS01 (crear activo fijo) para BRP - Creación. Columnas = plantilla del
+# usuario (plantillas/BRP/Plantilla Creación Activos BRP usuario.xlsm).
+SAP_FORMULARIO_AS01_BRP = [
+    # Pantalla inicial de AS01
+    {"tipo": "campo", "columna": "A", "nombre": "Clase de activo fijo", "xpath": ['//*[@id="M0:46:::2:29"]']},
+    {"tipo": "campo", "columna": "B", "nombre": "Sociedad", "xpath": ['//*[@id="M0:46:::3:29"]']},
+    {"tipo": "campo", "columna": "C", "nombre": "Ctd. de activos fijos iguales", "xpath": ['//*[@id="M0:46:::4:29"]']},
+    {"tipo": "enter", "nombre": "abrir el formulario completo"},
+    # Formulario completo (primera pestaña)
+    {"tipo": "campo", "columna": "D", "nombre": "Denominación", "xpath": ['//*[@id="M0:46:3:1:2B256:1::1:22"]']},
+    {"tipo": "campo", "columna": "AC", "nombre": "TXT.NUM.PRAL.AF", "xpath": ['//*[@id="M0:46:3:1:2B256:1::3:22"]']},
+    {"tipo": "campo", "columna": "F", "nombre": "Número de inventario", "xpath": ['//*[@id="M0:46:3:1:2B256:1::6:22"]']},
+    # Campo "Cantidad" '//*[@id="M0:46:3:1:2B256:1::7:22"]': no tiene columna en
+    #   la plantilla -> no se llena (decisión del usuario, 2026-10-05).
+    {"tipo": "campo", "columna": "G", "nombre": "Capitalizado el", "xpath": ['//*[@id="M0:46:3:1:2B256:3::1:22"]']},
+    # Pestaña 2
+    {"tipo": "pestana", "nombre": "pestaña 2 (centro de coste...)", "xpath": ['//*[@id="M0:46:3:1::0:1-title"]']},
+    {"tipo": "campo", "columna": "H", "nombre": "Centro de coste", "xpath": ['//*[@id="M0:46:3:1:2B257:1::1:22"]']},
+    {"tipo": "campo", "columna": "I", "nombre": "CeCo responsable", "xpath": ['//*[@id="M0:46:3:1:2B257:1::2:22"]']},
+    {"tipo": "campo", "columna": "J", "nombre": "Orden costes", "xpath": ['//*[@id="M0:46:3:1:2B257:1::3:22"]']},
+    {"tipo": "campo", "columna": "K", "nombre": "Centro", "xpath": ['//*[@id="M0:46:3:1:2B257:1::5:22"]']},
+    {"tipo": "campo", "columna": "L", "nombre": "Emplazamiento", "xpath": ['//*[@id="M0:46:3:1:2B257:1::6:22"]']},
+    {"tipo": "campo", "columna": "M", "nombre": "Matrícula vehículo", "xpath": ['//*[@id="M0:46:3:1:2B257:1::8:22"]']},
+    {"tipo": "casilla", "columna": "N", "nombre": "Activo fijo paralizado", "xpath": ['//*[@id="M0:46:3:1:2B257:1::12:1-txt"]']},
+    # Pestaña 3
+    {"tipo": "pestana", "nombre": "pestaña 3 (estado...)", "xpath": ['//*[@id="M0:46:3:1::0:2-title"]']},
+    {"tipo": "campo", "columna": "O", "nombre": "Estado", "xpath": ['//*[@id="M0:46:3:1:2B258:1::1:22"]']},
+    {"tipo": "campo", "columna": "P", "nombre": "Tipo", "xpath": ['//*[@id="M0:46:3:1:2B258:1::2:22"]']},
+    {"tipo": "campo", "columna": "Q", "nombre": "Procedencia", "xpath": ['//*[@id="M0:46:3:1:2B258:1::3:22"]']},
+    {"tipo": "campo", "columna": "R", "nombre": "Ubicación", "xpath": ['//*[@id="M0:46:3:1:2B258:1::4:22"]']},
+    # Campo "Total depreciados" '//*[@id="M0:46:3:1:2B258:1::5:22"]': no tiene
+    #   columna en la plantilla -> no se llena (decisión del usuario, 2026-10-05).
+    # Pestaña 4
+    {"tipo": "pestana", "nombre": "pestaña 4 (acreedor...)", "xpath": ['//*[@id="M0:46:3:1::0:3-title"]']},
+    {"tipo": "campo", "columna": "S", "nombre": "Acreedor", "xpath": ['//*[@id="M0:46:3:1:2B259:1::1:23"]']},
+    {"tipo": "campo", "columna": "T", "nombre": "Fabricante", "xpath": ['//*[@id="M0:46:3:1:2B259:1::2:23"]']},
+    {"tipo": "campo", "columna": "U", "nombre": "Denominación de tipo", "xpath": ['//*[@id="M0:46:3:1:2B259:1::7:23"]']},
+    {"tipo": "campo", "columna": "V", "nombre": "Parte prod. propia", "xpath": ['//*[@id="M0:46:3:1:2B259:1::12:23"]']},
+    # Pestaña 5
+    {"tipo": "pestana", "nombre": "pestaña 5 (clave de agrupamiento...)", "xpath": ['//*[@id="M0:46:3:1::0:4-title"]']},
+    {"tipo": "campo", "columna": "W", "nombre": "Clave de agrupamiento", "xpath": ['//*[@id="M0:46:3:1:2B260:1::1:22"]']},
+    {"tipo": "campo", "columna": "X", "nombre": "Indicador propiedad", "xpath": ['//*[@id="M0:46:3:1:2B260:1::2:22"]']},
+    # Columnas de la plantilla SIN campo en este formulario: E Marca, Y Número
+    # de contrato, Z Área de valoración, AA Duración, AB Periodo -> se IGNORAN
+    # (solo se llenan los campos de esta lista; decisión del usuario, 2026-10-05).
+]
+
+# Qué formulario usa cada (tipo, acción). Si no hay, el Flujo 3 no entra a SAP.
+SAP_FORMULARIOS_POR_CASO = {
+    (TIPO_BRP, ACCION_CREACION): SAP_FORMULARIO_AS01_BRP,
 }
-# 2) Campo donde se PEGA la ruta completa del archivo (la misma para las 3
-#    opciones), ej. C:\...\carga_sap\CREAR (BRP).xlsm. Decisión 2026-09-28:
-#    se escribe la ruta en vez de usar el botón del explorador
-#    ('//*[@id="ls-inputfieldhelpbutton"]'), porque ese botón abre una ventana
-#    de WINDOWS que Selenium no puede manejar.
-SAP_MASIVA_XPATH_CAMPO_RUTA = [
-    '//*[@id="M0:46:::3:59-r"]',
-]
-# 3) "Ejecución de test": se cambia con UN clic en su texto. Según la usuaria,
-#    al entrar a la transacción siempre aparece en el mismo estado, así que un
-#    clic basta (confirmado 2026-09-28; verificar en la 1ª prueba supervisada).
-SAP_MASIVA_XPATH_EJECUCION_TEST = [
-    '//*[@id="M0:46:::5:2-txt"]',
-]
 
-# Botón "Ejecutar" y cuadro de resultados: PENDIENTES (se capturan después de
-# la primera prueba supervisada).
-SAP_XPATH_BOTON_EJECUTAR = []
-# ⚠️ INTERRUPTOR DE SEGURIDAD. No hay SAP de pruebas: ejecutar crea activos
-# REALES. Con False el bot llega hasta deshabilitar "Ejecución de test" y SE
-# DETIENE (no hace clic en Ejecutar). Solo se cambia a True a propósito,
-# después de validar el flujo supervisado.
-SAP_EJECUTAR_REAL = False
+# SAP es lento al cambiar de pestaña/ventana: segundos entre el 1er y el 2º
+# clic de una pestaña, y después de cambiar de pestaña.
+SAP_ESPERA_ENTRE_CLICS_SEG = 2
 
-# Mientras SAP_EJECUTAR_REAL = False: segundos que el bot deja la pantalla de
-# SAP quieta (lista para revisar) antes de seguir con la siguiente solicitud.
-SAP_PAUSA_REVISION_SEG = 120
+# Formatos con los que se ESCRIBEN los valores en SAP. ⚠️ POR CONFIRMAR.
+SAP_FORMATO_FECHA = "%d.%m.%Y"     # ej. 05.10.2026 (columna G "Capitalizado el")
+SAP_SEPARADOR_DECIMAL = ","        # ej. 12,5 (solo para números con decimales)
 
-# --- AS02 (modificar activo, uno por uno) -------------------------------------
-# BRP - Creación: después de la masiva, por CADA activo creado se entra a AS02
-# y se escribe el valor de la columna "TXT.NUM.PRAL.AF (Nombre y NIT del
-# acreedor)" (capturado 2026-09-29). ⚠️ El recorrido aún NO está programado
-# (ver docs/PENDIENTES.md, P6); aquí solo quedan los selectores.
-# Pantalla inicial de AS02:
-SAP_AS02_XPATH_ACTIVO_FIJO = ['//*[@id="M0:46:::2:21-r"]']   # = Código SAP de la fila
-SAP_AS02_XPATH_SOCIEDAD = ['//*[@id="M0:46:::4:21"]']        # = columna B (Sociedad)
-# (luego Enter) Pantalla del activo: campo donde va la columna extra. Puede
-# traer texto: se BORRA antes de escribir.
-SAP_AS02_XPATH_TXT_ACREEDOR = ['//*[@id="M0:46:3:1:2B256:1::3:22"]']
 # Guardar: btn[11] es el botón "Guardar" estándar de SAP (Ctrl+S = respaldo).
 SAP_XPATH_BOTON_GUARDAR = ['//*[@id="M0:36::btn[11]"]']
-# ⚠️ INTERRUPTOR DE SEGURIDAD. Guardar en AS02 MODIFICA activos REALES. Con
-# False el bot llena AS02 pero NO guarda. Ventaja: se puede probar con un
-# activo que ya exista, sin crear nada.
-SAP_MODIFICAR_REAL = False
+
+# Mensaje de la barra inferior tras guardar. ⚠️ PENDIENTE el XPath: mientras
+# esté vacío, el bot NO guarda (no podría confirmar si el activo se creó).
+SAP_XPATH_MENSAJE_ESTADO = []
+# Éxito en AS01: "El act.fj. 7129560 0 se ha creado" -> código 7129560 (el
+# primer número; el segundo es el subnúmero).
+SAP_REGEX_ACTIVO_CREADO = r"act\.?\s*fj\.?\s*(\d+)\s+\d+\s+se ha creado"
+
+# Salir SIN guardar (supervisión): DOS clics en "Atrás" (separados por
+# SAP_ESPERA_ENTRE_CLICS_SEG) y confirmar "salir sin guardar" en la ventana
+# que aparece. SAP vuelve al inicio de la transacción.
+SAP_XPATH_BOTON_ATRAS = ['//*[@id="M0:36::btn[3]"]']
+SAP_XPATH_CONFIRMAR_SALIR_SIN_GUARDAR = ['//*[@id="M1:46:::3:18"]']
+
+# ⚠️ INTERRUPTOR DE SEGURIDAD. No hay SAP de pruebas: "Guardar" en AS01 /
+# AS02 / AS06 CREA, MODIFICA o BORRA activos REALES.
+#   False -> el bot llena el formulario de cada activo y SE DETIENE antes de
+#            Guardar (supervisión: botón "Continuar" en la ventana del bot,
+#            que pasa al siguiente activo SIN guardar).
+#   True  -> guarda. Solo se cambia a propósito, tras validar el flujo
+#            supervisado.
+# En CUALQUIER modo pruebas (REEMPLAZO o SOLO_SAP) guardar está PROHIBIDO
+# aunque esto sea True (ver flujo3_sap.guardar_permitido()).
+SAP_GUARDAR_REAL = False
+
+# --- AS02 (REFERENCIA para la acción MODIFICAR) -------------------------------
+# Capturados el 2026-09-29, cuando la creación BRP pasaba por AS02 después de
+# la masiva (ese paso ya NO existe). Se conservan como referencia para la
+# acción MODIFICAR, que tendrá su propia plantilla y se configura después.
+SAP_AS02_XPATH_ACTIVO_FIJO = ['//*[@id="M0:46:::2:21-r"]']   # código del activo
+SAP_AS02_XPATH_SOCIEDAD = ['//*[@id="M0:46:::4:21"]']        # sociedad
+# (luego Enter) Pantalla del activo: campo "TXT.NUM.PRAL.AF". Puede traer
+# texto: se BORRA antes de escribir.
+SAP_AS02_XPATH_TXT_ACREEDOR = ['//*[@id="M0:46:3:1:2B256:1::3:22"]']
 
 
 # ---------------------------------------------------------------------------

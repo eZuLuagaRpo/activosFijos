@@ -9,32 +9,44 @@
 
 ## 1. ¿Qué hace este bot? (propósito)
 
-Automatiza la **parametrización de activos fijos** en Bancolombia. Ejecuta
-**3 flujos encadenados**:
+Automatiza la **parametrización de activos fijos** en Bancolombia. Por cada
+solicitud de la Bandeja de Actividades de Appian:
 
-1. **Flujo 1 — Appian:** entra a Appian, lee la **Bandeja de Actividades**,
-   identifica las solicitudes pendientes y, por cada una, abre el caso, lee su
-   **tipo de activo** y **acción**, y **descarga el Excel adjunto**.
-2. **Flujo 2 — Validación:** el Excel que adjunta el usuario **ya es el formato
-   que se carga a SAP** (cambio de negocio 2026-09-27: ya no se transforma).
-   Este flujo es el **filtro de calidad**: valida la plantilla fila por fila con
+1. **Flujo 1 — Appian:** lee la **Bandeja de Actividades** (solo
+   "Parametrización de Activos", por fecha de vencimiento), abre cada
+   solicitud, identifica **tipo de activo** y **acción** (sección "Detalles")
+   y **descarga el Excel adjunto**.
+2. **Flujo 2 — Validación:** el Excel del usuario se valida fila por fila con
    las reglas de cada (tipo de activo, acción). Regla **todo o nada**: si una
-   fila es inválida, no se carga nada.
-3. **Flujo 3 — SAP:** carga ese mismo Excel a SAP. **Todavía NO implementado** (stub).
-4. **(Futuro) Respuesta en Appian:** en la misma solicitud, comentario
-   parametrizado + el mismo Excel con una columna nueva ("Código SAP" o el
-   error de SAP por fila), y cierre Finalizado Exitoso / No Exitoso.
+   fila es inválida, la solicitud no sigue a SAP.
+3. **Flujo 3 — SAP, activo por activo:** cada fila del Excel es UN activo. El
+   bot abre la transacción individual (**AS01** crear / **AS02** modificar /
+   **AS06** borrar) y **llena el formulario** con los valores de esa fila.
+   SAP **no** recibe el archivo (cambio de negocio 2026-10-04: ya no hay carga
+   ni modificación masiva). Si una fila falla en SAP, se anota el mensaje y se
+   **continúa** con la siguiente.
+4. **Respuesta en Appian:** en la misma solicitud, comentario parametrizado +
+   el Excel del usuario con una columna nueva **"Código SAP"** (el código del
+   activo creado, o el mensaje de error de SAP en esa fila), y cierre
+   Finalizado Exitoso / No Exitoso.
 
 **Diseño acordado de ejecución (2026-09-27, pendiente de implementar):**
 (1) Preparación: leer bandeja → descargar TODOS → validar TODOS; (2) uno por
-uno (válidos, por vencimiento): SAP → columna de resultado → responder en
-Appian. La llave de todo es el `case_id`; se guardará un registro de estado
-por caso en disco (`descargado → validado/invalido → cargado_sap →
-respondido`) para reanudar sin crear activos duplicados en SAP.
+uno (válidos, por vencimiento): SAP → columna "Código SAP" → responder en
+Appian. La llave de todo es el `case_id`; se guardará una **bitácora de
+estado** por solicitud y **por fila** en disco para reanudar sin crear
+activos duplicados en SAP.
 
-**Método de trabajo:** activo por activo y acción por acción. Hecho: **BRP –
-Creación (carga masiva)**. Las plantillas oficiales y el Word de proceso de
-cada activo viven en `plantillas/<ACTIVO>/` (raíz del repo).
+**Seguridad (no hay SAP de pruebas):** "Guardar" en SAP crea/modifica/borra
+activos REALES → interruptor `SAP_GUARDAR_REAL = False` (el bot llena el
+formulario y se detiene antes de Guardar; botón "Continuar" en la ventana del
+bot). En **modo pruebas**, guardar está **prohibido** aunque el interruptor
+esté encendido. Finalizar en Appian: `APPIAN_RESPONDER_REAL = False`.
+
+**Método de trabajo:** activo por activo y acción por acción. En curso:
+**BRP – Creación (AS01)**. Las plantillas oficiales y el Word de proceso de
+cada activo viven en `plantillas/<ACTIVO>/` (raíz del repo). Lo que falta,
+detallado, está en [PENDIENTES.md](PENDIENTES.md).
 
 La usuaria final (no técnica) abre un **.exe** con interfaz gráfica, escribe sus
 credenciales de Appian, presiona **Ejecutar** y ve el avance en una consola en vivo.
@@ -46,91 +58,89 @@ credenciales de Appian, presiona **Ejecutar** y ve el avance en una consola en v
 | Parte | Estado |
 |---|---|
 | UI (login + consola en vivo, hilo aparte + cola) | ✅ Hecho |
-| Configuración central (`config.py`) | ✅ Hecho (con placeholders a completar) |
+| Configuración central (`config.py`) | ✅ Hecho (`APPIAN_URL` sigue como placeholder en el repo) |
 | Logging (archivo + consola UI, enmascara contraseñas) | ✅ Hecho |
 | Wrapper de la librería Appian (valida `success`) | ✅ Hecho |
-| Lector de la Bandeja (`bandeja_reader`) | ✅ Hecho, **con selectores placeholder** |
-| Flujo 1 (bandeja → por caso: abrir + leer + descargar) | ✅ Hecho, **labels placeholder** |
-| Flujo 2 (validación de plantilla) — motor común | ✅ Hecho |
-| Validación BRP – Creación (V1–V5, todo o nada) | ✅ Hecho + pruebas (`tests/`) |
-| Validación resto de activos/acciones | 🔲 Se van agregando uno a uno |
-| Flujo 3 (SAP) | 🔲 Stub (pendiente a propósito) |
-| Respuesta en Appian + registro de estado por caso | 🔲 Pendiente |
+| Lector de la Bandeja (`bandeja_reader`) | ✅ Probado en real · 🔲 paginación (P12) |
+| Flujo 1 (bandeja → abrir → tipo/acción → descargar) | ✅ Probado en real |
+| Modo pruebas REEMPLAZO (Appian real + tu Excel) | ✅ Hecho ([GUIA_MODO_PRUEBAS.md](GUIA_MODO_PRUEBAS.md)) |
+| Modo pruebas SOLO SAP (sin Appian: tu Excel → validación → SAP) | ✅ Hecho ([GUIA_MODO_PRUEBAS.md](GUIA_MODO_PRUEBAS.md)) |
+| Flujo 2: motor de validación + BRP – Creación (A..AC) | ✅ Hecho + pruebas |
+| Validación de otros activos/acciones | 🔲 Uno a uno (AS02/AS06 tendrán plantilla propia) |
+| SAP: base (pestaña, login, transacción, clics, iframes) | ✅ Hecho (`sap/sap_webgui.py`) |
+| SAP: interruptor de guardar + bloqueo en modo pruebas | ✅ Hecho (`flujo3_sap.guardar_permitido`) |
+| SAP: formulario AS01 por configuración (BRP – Creación) | ✅ Hecho (3 dudas abiertas, PENDIENTES P3) |
+| SAP: supervisión (se detiene antes de Guardar + botón "Continuar (sin guardar)") | ✅ Hecho |
+| SAP: leer código / error y columna "Código SAP" | ✅ Código listo · 🔲 falta XPath del mensaje (P5) |
+| Bitácora de estado por solicitud y por fila | 🔲 Pendiente (prioritaria) |
+| Respuesta en Appian | 🔲 Pendiente (selectores capturados) |
 | Orquestador + resumen final | ✅ Hecho |
 | Empaquetado `.exe` (`build.bat`) | ✅ Hecho (falta probarlo en un PC sin Python) |
-
-**Lo que falta para que funcione de verdad** son datos del entorno real, no
-código nuevo: URL de Appian, selectores de la bandeja, labels de los campos y el
-mapeo de columnas. Todo eso está explicado en
-[CONFIGURACION_MANUAL.md](CONFIGURACION_MANUAL.md).
 
 ---
 
 ## 3. Arquitectura y módulos
 
-> ⚠️ Desde el 2026-09-27 el paquete `transformacion/` ya no existe: lo
-> reemplazó `validacion/` (ver Changelog). El árbol de abajo lo refleja.
-
 La regla de oro es la **separación de responsabilidades**:
-**UI ↔ lógica (flujos) ↔ Appian ↔ validación**. Y **se reutiliza** la
+**UI ↔ lógica (flujos) ↔ Appian ↔ validación ↔ SAP**. Y **se reutiliza** la
 librería `an0016001_appian_flow` (login, navegación, descarga, formularios).
 
 ```
 rpa_activos_fijos/
 ├── app.py                      # Punto de entrada: lanza la UI
-├── config.py                   # ⚙️ Panel de control: URL, navegador, timeouts, rutas,
-│                               #    selectores, labels, alias de negocio. NADA hardcodeado fuera de aquí.
+├── config.py                   # ⚙️ Panel de control: URLs, navegador, timeouts, rutas,
+│                               #    selectores, interruptores. NADA hardcodeado fuera de aquí.
 ├── requirements.txt
 ├── build.bat                   # Empaqueta a .exe con PyInstaller
-├── assets/                     # logo.png, icon.ico, fondo.png (reutilizados de la UI de ejemplo)
+├── assets/                     # logo.png, icon.ico, fondo.png
 │
 ├── ui/
 │   ├── styles/theme.py         # Paleta Bancolombia, tema claro
 │   ├── app_window.py           # Ventana principal + navegación + credenciales en memoria
 │   └── views/
 │       ├── login_view.py       # Credenciales de Appian + botón "Iniciar"
-│       └── console_view.py     # Consola en vivo + botón "Ejecutar" (bot en hilo aparte + cola)
+│       └── console_view.py     # Consola en vivo (bot en hilo aparte + cola) + botón "Continuar (sin guardar)"
 │
 ├── core/
 │   ├── logger.py               # Logs → consola UI (cola) + archivo con timestamp. Enmascara contraseñas.
-│   ├── exceptions.py           # Excepciones propias (CasoNoEncontrado, SinAdjuntos, etc.)
+│   ├── exceptions.py           # Excepciones propias (Appian, Validación, SapError, CasoOmitido...)
 │   ├── retry.py                # Reintentos con backoff (decorador y función)
-│   ├── models.py               # dataclasses: Solicitud, ArchivoMacro, ResultadoCaso, ResumenLote
-│   └── texto.py                # Normalizar texto (minúsculas, sin tildes) para mapear tipo/acción
+│   ├── models.py               # dataclasses: CasoBandeja, Solicitud, ResultadoFila/Validacion, ResultadoCaso, ResumenLote
+│   └── texto.py                # Normalizar texto (minúsculas, sin tildes)
 │
 ├── appian/
 │   ├── appian_client.py        # Wrapper de AppianFlow: valida `success` y lanza excepciones propias
-│   └── bandeja_reader.py       # NUEVO: lee la Bandeja de Actividades (selectores placeholder + respaldo)
+│   └── bandeja_reader.py       # Lee la Bandeja de Actividades (filtro, prioridad, href de cada fila)
 │
 ├── flujos/
-│   ├── flujo1_appian.py        # login → bandeja → por caso: navegar directo + get_case_data
+│   ├── flujo1_appian.py        # bandeja → por caso: navegar directo + get_case_data + tipo/acción (+ MODO PRUEBAS)
+│   ├── modo_solo_sap.py        # MODO PRUEBAS SOLO SAP: Excel de downloads_test en vez de Appian
 │   ├── flujo2_validar.py       # Valida la plantilla (usa validacion/router); todo o nada
-│   └── flujo3_sap.py           # STUB: carga a SAP pendiente
+│   └── flujo3_sap.py           # SAP activo por activo: formulario por config, supervisión, "Código SAP"
 │
 ├── validacion/
 │   ├── router.py               # (tipo, acción) → validador. Sin validador = el caso no se procesa
-│   ├── base_validador.py       # Motor común: 1ª hoja, columnas por ENCABEZADO, V1 obligatorios,
-│   │                           #   V3 estructura, largos máximos (advertencia), filas vacías
+│   ├── base_validador.py       # Motor común: 1ª hoja, columnas por ENCABEZADO, obligatorios,
+│   │                           #   estructura, largos (aviso o error), filas vacías
 │   └── plantillas/
-│       └── brp_creacion.py     # BRP – Creación: columnas A..AB + V2 (cantidad=1) + V4 (vehículos)
+│       └── brp_creacion.py     # BRP – Creación: A..AC + cantidad=1 + vehículos + AC ≤ 50
 │
 ├── sap/
-│   └── sap_webgui.py           # SAP en el navegador: pestaña, login, transacción, clics (iframes)
+│   └── sap_webgui.py           # SAP en el navegador: pestaña, login, transacción, clics/escritura (iframes)
 │
 ├── tests/                      # pytest: `python -m pytest tests -q` (usa plantillas/ de la raíz)
 │
-├── orquestador.py              # Corre Flujo1 → Flujo2 → Flujo3(stub) por cada caso + resumen
+├── orquestador.py              # Flujo1 → Flujo2 → Flujo3 por cada caso; vuelve a Appian; resumen
 ├── downloads/                  # Excel descargados de Appian (runtime)
-├── downloads_test/             # MODO PRUEBAS: Excel preparados a mano (PDA-7889.xlsm)
-├── carga_sap/                  # Copia temporal con el nombre exacto de SAP ("CREAR (BRP).xlsm")
-├── salidas/                    # Excel ya en formato macro (runtime)
+├── downloads_test/             # MODO PRUEBAS: Excel preparados a mano (PDA-7889.xlsx/.xlsm)
+├── salidas/                    # (futuro) Excel con "Código SAP" para responder (runtime)
 ├── logs/                       # Un log por ejecución (con timestamp)
 └── docs/
     ├── ESTADO_PROYECTO.md         # este archivo
+    ├── PENDIENTES.md              # TODO lo que falta, detallado
+    ├── GUIA_MODO_PRUEBAS.md       # paso a paso para probar + qué hace cada interruptor
     ├── CONFIGURACION_MANUAL.md    # lo que hay que conseguir/configurar a mano
-    ├── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
-    ├── GUIA_MODO_PRUEBAS.md       # paso a paso para probar con MODO_PRUEBAS_REEMPLAZO
-    └── PENDIENTES.md              # TODO lo que falta, detallado (P1..P11)
+    └── GUIA_EXTRACCION_ETIQUETAS.md # cómo capturar selectores/etiquetas reales en Appian
 ```
 
 ### Cómo fluyen los datos (resumen)
@@ -140,12 +150,12 @@ flowchart TD
     UI[UI: login + Ejecutar] -->|hilo aparte + cola| ORQ[orquestador.ejecutar]
     ORQ --> C[AppianClient.start login]
     C --> B[bandeja_reader.listar_pendientes]
-    B -->|lista de case_id| LOOP{por cada caso}
+    B -->|lista de CasoBandeja| LOOP{por cada caso}
     LOOP --> F1[Flujo 1: navegar directo + get_case_data + descargar Excel]
     F1 -->|Solicitud| F2[Flujo 2: router -> validador -> todo o nada]
-    F2 -->|plantilla válida| F3[Flujo 3: cargar_a_sap STUB]
-    F3 --> LOOP
-    LOOP -->|fin| R[Resumen: total / OK / fallidos]
+    F2 -->|plantilla válida| F3[Flujo 3: SAP fila por fila AS01/AS02/AS06 - en construcción]
+    F3 -->|vuelve a la pestaña de Appian| LOOP
+    LOOP -->|fin| R[Resumen: total / OK / fallidos / omitidos]
 ```
 
 ### Decisiones de diseño importantes
@@ -155,16 +165,22 @@ flowchart TD
   excepción propia si falla. El resto del código usa `try/except` normal.
 - **Aislamiento por caso**: en `orquestador._procesar_un_caso` cada caso va en su
   propio `try/except`. Un caso que falla se registra y **no detiene el lote**.
-- **Cierre limpio**: el navegador se cierra **siempre** en un `finally`.
-- **Nada hardcodeado**: URL, navegador, timeouts, selectores, labels y alias de
-  negocio viven en `config.py`. El mapeo de columnas vive en
-  `transformacion/mapping/`.
-- **Selectores de respaldo**: `bandeja_reader` prueba varios XPath en orden
-  (principal → alternativos) antes de fallar.
+  En SAP, además, una **fila** que falla no detiene las demás filas.
+- **Cierre limpio**: el navegador se cierra **siempre** en un `finally`, y tras
+  cada caso se vuelve a la pestaña de Appian.
+- **Nada hardcodeado**: URLs, navegador, timeouts, selectores, interruptores y
+  alias de negocio viven en `config.py`.
+- **Selectores en lista (principal → respaldos)** en Appian y SAP. En Appian se
+  prefieren selectores por texto visible o estructura (los IDs largos que genera
+  Appian son inestables); en SAP los IDs (`ToolbarOkCode`, `M0:46:...`) son
+  estables por pantalla.
+- **Seguridad en sistemas reales**: interruptores en `False` por defecto
+  (`SAP_GUARDAR_REAL`, `APPIAN_RESPONDER_REAL`) y bloqueo de guardado en modo
+  pruebas.
 - **Concurrencia sin congelar la UI**: el bot corre en un `threading.Thread` y se
   comunica con la UI mediante `queue.Queue`; la UI la vacía con `after()`.
-- **Seguridad**: las contraseñas nunca se escriben en logs (el logger las
-  enmascara) y solo viven en memoria durante la ejecución.
+- **Contraseñas**: nunca se escriben en logs (el logger las enmascara) y solo
+  viven en memoria durante la ejecución.
 
 ---
 
@@ -208,25 +224,126 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 
 ## 6. Supuestos abiertos (PENDIENTES de confirmar)
 
-1. **La usuaria recibe SOLO solicitudes de activos fijos** en su bandeja.
-   → Si llegan mezcladas, activar `BANDEJA_FILTRAR_POR_TIPO` en `config.py` e
-   implementar `_aplicar_filtro_tipo` en `bandeja_reader.py`.
-2. **Los labels exactos** de "tipo de activo" y "acción" en el detalle del caso.
-   → Están como placeholder en `LABELS_TIPO_ACTIVO` / `LABELS_ACCION`.
-3. **Los selectores XPath** de la bandeja (fila, ID, filtro). → Placeholder en
-   `BANDEJA_XPATH_*`.
-4. ~~El mapeo de columnas~~ → ya no aplica (el Excel del usuario va directo a SAP).
-5. ~~El código real de la acción "eliminación"~~ → ya no aplica (era de las macros).
-6. **El navegador** de la usuaria (se asume Edge).
-7. **Plantilla inválida: ¿se le devuelven al usuario las observaciones por
+> La lista completa y detallada está en [PENDIENTES.md](PENDIENTES.md).
+
+1. **El navegador** de la usuaria (se asume Edge).
+2. **Login de SAP**: IDs estándar (`sap-user`, `sap-password`,
+   `LOGON_BUTTON`) — por confirmar en la 1ª prueba real.
+3. **Plantilla inválida: ¿se le devuelven al usuario las observaciones por
    fila?** Lo confirma el usuario funcional. Mientras tanto el caso queda
    FALLIDO con el detalle por fila en el log.
+4. **Bandeja paginada** (P12): hoy solo se lee la página visible.
 
 ---
 
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-10-05 (2) — Nuevo MODO PRUEBAS SOLO SAP (sin Appian).**
+  - Motivo: poder probar la validación y AS01 en SAP cuando no hay
+    solicitudes de BRP en la bandeja de Appian.
+  - `config.py`: `MODO_PRUEBAS_SOLO_SAP = False`. Excluyente con
+    `MODO_PRUEBAS_REEMPLAZO` (si ambos están en True, el bot no arranca).
+  - Archivos: `downloads_test/<id>_<tipo>_<accion>.xlsx|.xlsm` (ej.
+    `prueba1_brp_creacion.xlsx`); el tipo y la acción salen del nombre
+    (canónicos de config.py; no distingue mayúsculas). Otros nombres →
+    omitidos con aviso. Nuevo `flujos/modo_solo_sap.py`.
+  - `orquestador.py` reorganizado: `_procesar()` común (obtener solicitud →
+    Flujo 2 → Flujo 3, mismo manejo de errores), `_ejecutar_con_appian()`
+    (recorrido normal, sin cambios de comportamiento) y `_ejecutar_solo_sap()`
+    (crea `AppianClient` SOLO para abrir el navegador, sin `start()`). El
+    navegador se cierra siempre (también si falla el login de Appian),
+    usando un contenedor explícito en vez de variables sueltas.
+  - `flujo3_sap.guardar_permitido()`: False también en modo solo SAP.
+  - Pruebas: `tests/test_modo_solo_sap.py` (nombres, guardar prohibido,
+    modos excluyentes, recorrido completo sin Appian: no inicia sesión,
+    cierra navegador, "Continuar" por fila, nunca guarda, archivo intacto,
+    sin archivos no abre navegador) → 79 OK.
+  - GUIA_MODO_PRUEBAS.md: nueva sección 0 "¿Qué modo uso?", interruptor en
+    la sección 3, nueva sección 5 (paso a paso del modo solo SAP), checklist
+    y problemas comunes de ambos modos.
+
+- **2026-10-05 — AS01 (BRP – Creación) por configuración + supervisión con
+  botón "Continuar".**
+  - `config.py`: `SAP_FORMULARIO_AS01_BRP` (XPath entregados por el usuario:
+    pantalla inicial A/B/C → Enter → D, AC, F, G → 4 pestañas con doble clic
+    lento → H..N, O..R, S..V, W..X), `SAP_FORMULARIOS_POR_CASO`,
+    `SAP_ESPERA_ENTRE_CLICS_SEG = 2`, `SAP_FORMATO_FECHA` y
+    `SAP_SEPARADOR_DECIMAL` (por confirmar), `SAP_XPATH_MENSAJE_ESTADO = []`
+    (pendiente), `SAP_REGEX_ACTIVO_CREADO` ("El act.fj. 7129560 0 se ha
+    creado" → 7129560), `SAP_XPATH_BOTON_ATRAS` y
+    `SAP_XPATH_CONFIRMAR_SALIR_SIN_GUARDAR`.
+  - `flujo3_sap.cargar_a_sap()`: fila por fila → `/nAS01` → llenar (celdas
+    vacías no se tocan; casilla solo si trae valor) → si `guardar_permitido()`
+    Guardar + leer código/error, si no: se detiene, pide "Continuar" y sale
+    SIN guardar (Atrás ×2 + confirmar). Error en una fila → `ERROR: ...` en
+    `Solicitud.resultados_sap` y se continúa (sin presionar Atrás).
+    Seguridad extra: nunca guarda si `SAP_XPATH_MENSAJE_ESTADO` está vacío.
+    `escribir_columna_codigo_sap()` → `salidas/<archivo>_RESPUESTA.<ext>`
+    con "Código SAP" (solo cuando se guarda de verdad).
+  - `sap/sap_webgui.py`: `enter()`, `doble_clic_lento()`, `existe()` (espera
+    corta, no lanza), `leer_texto()`.
+  - `validacion/base_validador.py`: `leer_filas()` (misma lógica que la
+    validación; la usa SAP). El log ahora dice "Validando ... con la
+    plantilla" / "Leyendo filas de ... con la plantilla".
+  - `ui/views/console_view.py`: botón **"Continuar (sin guardar)"**. El bot
+    avisa por la COLA (no toca widgets desde su hilo: la primera versión con
+    `after()` desde el hilo del bot falló en la prueba de humo) y espera un
+    `threading.Event`. `orquestador.ejecutar(..., esperar_continuar=...)`.
+  - Pruebas: nuevo `tests/test_sap_as01.py` (SAP falso: orden de campos,
+    vacíos, casilla, nunca guarda en supervisión ni en MODO PRUEBAS, sin
+    XPath del mensaje no guarda, error en fila y continúa, códigos +
+    columna "Código SAP") + 3 en `test_sap_webgui.py` → 68 OK. Simulación
+    completa por el orquestador OK (2 "Continuar", Guardar nunca). Prueba
+    de humo de la ventana real: el botón se habilita, libera al bot y se
+    vuelve a deshabilitar.
+  - Docs: GUIA_MODO_PRUEBAS.md (qué hace en SAP, qué revisar en cada pausa,
+    ajustes, errores) y PENDIENTES.md (P3 y P4 ✅, P5 código listo).
+  - Decisión del usuario (mismo día): solo se llenan los campos de los XPath
+    entregados; columnas sin XPath (E, Y, Z, AA, AB) se ignoran; campos sin
+    columna ("Cantidad", "Total depreciados") no se llenan; celda vacía → el
+    campo no se toca. Coincide con lo implementado (solo comentarios/docs).
+
+- **2026-10-04 — CAMBIO DE NEGOCIO: no hay carga masiva. SAP se trabaja
+  activo por activo con AS01 / AS02 / AS06. Se retira todo lo de la masiva.**
+  - Decisión de negocio: la carga masiva (`Z_AM_MASIVA`) y la modificación
+    masiva no se pueden usar. Cada fila del Excel es un activo y se crea /
+    modifica / borra con la transacción individual, llenando el formulario
+    con los valores de la fila. El Excel del usuario sigue IGUAL (A..AC) y
+    Appian no cambia.
+  - BRP – Creación = solo **AS01** (AS01 tiene el campo "TXT.NUM.PRAL.AF",
+    así que la columna AC se escribe al crear; el paso por AS02 desaparece).
+  - Por fila: éxito → código en la columna "Código SAP"; error de SAP (ej.
+    "ya existe") → el mensaje en esa columna, log y se CONTINÚA.
+  - **Retirado:** carpeta `carga_sap/` (y su `.gitignore`), copia
+    `CREAR (BRP).xlsm` (`preparar_archivo_sap`, `_ajustar_columnas`),
+    `NOMBRE_ARCHIVO_SAP`, `COLUMNAS_QUITAR_ANTES_DE_SAP`,
+    `ULTIMA_COLUMNA_PLANTILLA`, `CARGA_SAP_DIR`, `Solicitud.archivo_sap`,
+    toda la config de `Z_AM_MASIVA` (opción, ruta, "Ejecución de test"),
+    `SAP_XPATH_BOTON_EJECUTAR`, `SAP_PAUSA_REVISION_SEG`, la etapa 1 de la
+    masiva en `flujo3_sap.py` y `tests/test_flujo3_archivo_sap.py`.
+  - **Interruptores:** `SAP_EJECUTAR_REAL` y `SAP_MODIFICAR_REAL` se
+    unifican en **`SAP_GUARDAR_REAL = False`** (todo cambio real en SAP pasa
+    por "Guardar"). Nuevo `flujo3_sap.guardar_permitido()`: solo True con el
+    interruptor encendido **y fuera de MODO PRUEBAS** (en modo pruebas
+    guardar está prohibido siempre).
+  - **Se conserva:** `sap/sap_webgui.py` (pestaña, login, transacción,
+    clic/escribir, iframes), `SAP_URL`, login, barra, `SAP_XPATH_BOTON_GUARDAR`
+    y los selectores de AS02 (como referencia para la acción MODIFICAR).
+    `SAP_TRANSACCION_POR_CASO = {(brp, creacion): AS01}`.
+  - `flujo3_sap.cargar_a_sap()`: mientras el formulario de AS01 no esté
+    configurado, **no entra a SAP** y deja el caso como "Pendiente de SAP
+    (AS01 sin configurar)".
+  - Validación: BRP – Creación vuelve a aceptar **.xlsx y .xlsm**.
+  - Pruebas: `tests/test_sap_etapa1.py` → `tests/test_sap_webgui.py` (base de
+    SAP + `guardar_permitido` + Flujo 3 pendiente) → 58 OK. Simulación
+    completa OK (.xlsx válido, inválido rechazado, SAP no se abre).
+  - La plantilla `plantillas/BRP/Plantilla Creación Activos BRP.xlsm` (A..AB,
+    formato de la masiva) ya no la usa el bot ni las pruebas.
+  - Docs actualizados: este archivo (secciones 1–3 y 6), PENDIENTES.md,
+    GUIA_MODO_PRUEBAS.md, CONFIGURACION_MANUAL.md. Las entradas anteriores
+    del Changelog se conservan como historia (describen la masiva).
 
 - **2026-09-29 (2) — BRP – Creación: plantilla del usuario con columna AC
   + copia para SAP sin AC + selectores de AS02.**

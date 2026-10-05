@@ -1,17 +1,16 @@
 """
 validacion/plantillas/brp_creacion.py — Plantilla "Creación Activos BRP".
 
-Carga MASIVA: cada fila de datos (desde la fila 2) es un activo a crear.
+Cada fila de datos (desde la fila 2) es UN activo a crear. Desde el
+2026-10-04 se crean uno por uno en SAP con AS01 (ya no hay carga masiva):
+el bot lee cada fila y llena el formulario de AS01 con sus valores.
 Plantilla que envía el USUARIO: plantillas/BRP/Plantilla Creación Activos
 BRP usuario.xlsm (hoja "FORMATO", encabezados en la fila 1, columnas A..AC).
-  - A..AB: formato EXACTO de la carga masiva de SAP (referencia:
-    plantillas/BRP/Plantilla Creación Activos BRP.xlsm).
-  - AC "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" (2026-09-29): columna
-    EXTRA que SAP no acepta en la masiva. Se QUITA de la copia para SAP
-    (COLUMNAS_QUITAR_ANTES_DE_SAP en config.py) y su valor se escribe
-    después, activo por activo, en AS02. Informativa, máx. 50 caracteres
-    (si se excede = ERROR). Es obligatorio que la columna EXISTA: una
-    plantilla sin AC se rechaza por encabezado faltante (V3).
+  - AC "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)" (2026-09-29): se
+    escribe en el campo del mismo nombre de AS01. Informativa, máx. 50
+    caracteres (si se excede = ERROR). Es obligatorio que la columna EXISTA:
+    una plantilla sin AC se rechaza por encabezado faltante (V3).
+  - La columna S "ACREEDOR" es OTRO campo.
 La macro `Crear_BRP` que trae el archivo es una utilidad del usuario: se ignora.
 
 Reglas (entregadas por negocio, 2026-09-27):
@@ -24,7 +23,7 @@ Reglas (entregadas por negocio, 2026-09-27):
        obligatoria.
   V5 · T máx. 30 y U máx. 15 caracteres -> solo advertencia.
   Final: TODO O NADA. Si una fila es inválida, no se procesa la plantilla.
-  Formato: solo .xlsm (2026-09-28), porque SAP la carga como "CREAR (BRP).xlsm".
+  Formato: .xlsx o .xlsm (2026-10-04; antes solo .xlsm por la masiva).
 
 FUENTE DE VERDAD de qué es obligatorio / condicional / informativo: el Word
 de proceso (plantillas/BRP/Activos BRP Creación.docx), comparado por NOMBRE
@@ -47,9 +46,8 @@ from validacion.base_validador import (
 
 class ValidadorBrpCreacion(BaseValidador):
     nombre = "BRP - Creación"
-    # SAP carga esta plantilla como "CREAR (BRP).xlsm": solo se acepta .xlsm
-    # (un .xlsx no se puede convertir solo cambiándole el nombre).
-    extensiones = (".xlsm",)
+    # Formatos aceptados: .xlsx y .xlsm (los de BaseValidador). Desde el
+    # 2026-10-04 SAP ya no recibe el archivo, así que no se exige .xlsm.
 
     columnas = (
         Columna("A", "CLASE ACTIVOS FIJOS. OBLIGATORIA", "Clase de Activo Fijo", OBLIGATORIO),
@@ -80,8 +78,8 @@ class ValidadorBrpCreacion(BaseValidador):
         Columna("Z", "AREA DE VALORACIÓN", "Área de Valoración", INFORMATIVO),
         Columna("AA", "DURACIÓN", "Duración", INFORMATIVO),
         Columna("AB", "PERIODO", "Periodo", NO_SE_VALIDA),
-        # Columna EXTRA (solo la usa el bot; se quita antes de SAP y se
-        # escribe luego en AS02). Informativa, pero > 50 caracteres = ERROR.
+        # Columna EXTRA: va al campo "TXT.NUM.PRAL.AF" de AS01.
+        # Informativa, pero > 50 caracteres = ERROR.
         Columna("AC", "TXT.NUM.PRAL.AF (Nombre y NIT del acreedor)",
                 "Nombre y NIT del acreedor", INFORMATIVO,
                 max_largo=50, largo_es_error=True),
