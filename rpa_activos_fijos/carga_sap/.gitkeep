@@ -1,3 +1,0 @@
-# Copia temporal con el nombre EXACTO que exige SAP (ej. "CREAR (BRP).xlsm").
-# La crea el bot justo antes de cargar cada solicitud y la reemplaza en la siguiente.
-# NO dejes archivos aquí a mano. Ver NOMBRE_ARCHIVO_SAP en config.py.
