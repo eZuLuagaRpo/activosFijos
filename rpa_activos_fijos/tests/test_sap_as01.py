@@ -64,6 +64,9 @@ class FakeSap:
     def asegurar_sesion(self):
         self.acciones.append(("sesion",))
 
+    def recargar(self):
+        self.acciones.append(("recargar",))
+
     def ir_a_transaccion(self, codigo):
         self.acciones.append(("transaccion", codigo))
 
@@ -165,6 +168,11 @@ def test_supervision_llena_en_orden_pide_continuar_y_sale_sin_guardar(tmp_path):
     # Sale sin guardar: Atrás (doble, lento) + confirmar.
     assert sap.acciones.count(("doble_clic", ATRAS[0], config.SAP_ESPERA_ENTRE_CLICS_SEG)) == 2
     assert sap.acciones.count(("clic", "confirmar_salir")) == 2
+    # Entre filas: salir sin guardar -> RECARGAR -> /nAS01 (no antes de la 1ª).
+    assert sap.acciones.count(("recargar",)) == 1
+    i = sap.acciones.index(("recargar",))
+    assert sap.acciones[i - 1] == ("clic", "confirmar_salir")
+    assert sap.acciones[i + 1] == ("transaccion", "AS01")
     assert paso == "Revisado en SAP SIN guardar (2 fila(s))"
     assert sol.resultados_sap == {}
 
@@ -197,6 +205,7 @@ def test_error_en_una_fila_se_anota_y_continua(tmp_path):
 
     assert sol.resultados_sap[2].startswith("ERROR:") and sol.resultados_sap[3].startswith("ERROR:")
     assert sap.acciones.count(("transaccion", "AS01")) == 2       # siguió con la fila 3
+    assert sap.acciones.count(("recargar",)) == 1                 # ...con SAP recargado
     # Tras un error NO se presiona "Atrás" (podría salir al menú / cerrar sesión).
     assert not [a for a in sap.acciones if a[:2] == ("doble_clic", ATRAS[0])]
     assert pedidos == []
@@ -213,6 +222,7 @@ def test_guardar_lee_codigos_y_errores_y_escribe_la_columna(tmp_path, monkeypatc
     paso = flujo3_sap.cargar_a_sap(sap, sol)
 
     assert sap.acciones.count(("clic", GUARDAR[0])) == 2
+    assert sap.acciones.count(("recargar",)) == 1                 # también al guardar
     assert sol.resultados_sap == {2: "7129560", 3: "ERROR: Centro de coste CC9 no existe"}
     assert paso == "SAP: 1 creado(s), 1 con error"
 

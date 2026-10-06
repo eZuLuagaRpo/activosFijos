@@ -10,6 +10,11 @@ no entre a SAP mientras el formulario de AS01 no esté configurado.
 import logging
 
 import pytest
+from selenium.common.exceptions import (
+    NoAlertPresentException,
+    StaleElementReferenceException,
+    UnexpectedAlertPresentException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
@@ -36,8 +41,16 @@ class FakeElement:
         self.nombre = nombre
         self.al_clic = al_clic
         self.texto = ""
+        self.vencerse = 0     # cuántos clics fallan con "elemento vencido"
 
     def click(self):
+        if self.vencerse:
+            self.vencerse -= 1
+            # Igual al error real de la 1ª prueba (Selenium antepone "Message:").
+            raise StaleElementReferenceException(
+                "stale element reference: stale element not found\n"
+                "  (Session info: MicrosoftEdge=154.0.4258.53)",
+                stacktrace=["msedgedriver!GetHandleVerifier [0x7ff77a8620a5+4c15]"])
         self.navegador.acciones.append(("clic", self.nombre))
         if self.al_clic:
             self.al_clic()
@@ -72,6 +85,19 @@ class FakeSwitch:
     def active_element(self):
         return FakeElement(self.n, "foco")
 
+    @property
+    def alert(self):
+        if not self.n.aviso_abierto:
+            raise NoAlertPresentException()
+        navegador = self.n
+
+        class Aviso:
+            def accept(self):
+                navegador.aviso_abierto = False
+                navegador.acciones.append(("aviso_aceptado",))
+
+        return Aviso()
+
     def frame(self, frame):
         self.n.frame = frame
 
@@ -90,6 +116,16 @@ class FakeBrowser:
         self.pagina_sap = {}          # xpath -> FakeElement (página principal)
         self.pagina_iframe = {}       # xpath -> FakeElement (dentro del iframe)
         self.switch_to = FakeSwitch(self)
+        self.aviso_abierto = False
+        self.aviso_al_recargar = False   # la 1ª recarga choca con "¿Salir del sitio?"
+
+    def refresh(self):
+        if self.aviso_al_recargar:
+            self.aviso_al_recargar = False
+            self.aviso_abierto = True
+            raise UnexpectedAlertPresentException("¿Salir del sitio?")
+        self.acciones.append(("recargar",))
+        self._mostrar_sap()       # la sesión sigue activa: vuelve al inicio de SAP
 
     @property
     def current_window_handle(self):
@@ -223,6 +259,53 @@ def test_existe_devuelve_none_si_no_aparece():
     sap.asegurar_sesion()
     assert sap.existe(['//*[@id="NO-EXISTE"]'], 0) is None
     assert sap.existe([CAMPO], 0) is not None
+
+
+def test_recargar_deja_sap_en_el_inicio_con_pantalla_nueva():
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    barra_vieja = navegador.pagina_sap[BARRA]
+    sap.volver_a_appian()          # aunque esté en la pestaña de Appian...
+    sap.recargar()
+    assert ("recargar",) in navegador.acciones
+    assert navegador.actual == "sap"                       # ...recarga la de SAP
+    assert navegador.pagina_sap[BARRA] is not barra_vieja  # pantalla nueva
+    sap.ir_a_transaccion("AS01")
+    assert navegador.acciones[-1] == ("escribir", "barra", "/nAS01", True)
+
+
+def test_recargar_acepta_el_aviso_del_navegador_y_reintenta():
+    navegador = FakeBrowser(con_sso=True)
+    navegador.aviso_al_recargar = True
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    sap.recargar()
+    assert ("aviso_aceptado",) in navegador.acciones
+    assert ("recargar",) in navegador.acciones
+
+
+def test_elemento_vencido_se_vuelve_a_buscar_y_funciona():
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    navegador.pagina_sap[BARRA].vencerse = 1     # SAP redibujó justo al usarla
+    sap.ir_a_transaccion("AS01")
+    assert navegador.acciones[-1] == ("escribir", "barra", "/nAS01", True)
+
+
+def test_elemento_que_siempre_se_vence_da_error_corto_sin_stacktrace(monkeypatch):
+    monkeypatch.setattr(sap_webgui.time, "sleep", lambda s: None)
+    navegador = FakeBrowser(con_sso=True)
+    sap = sap_con(navegador)
+    sap.asegurar_sesion()
+    navegador.pagina_sap[BARRA].vencerse = 99
+    with pytest.raises(SapError) as error:
+        sap.ir_a_transaccion("AS01")
+    assert str(error.value) == (
+        "No se pudo escribir la transacción AS01: stale element reference: "
+        "stale element not found"
+    )
 
 
 def test_selector_que_no_aparece_da_error_claro():

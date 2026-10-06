@@ -137,6 +137,7 @@ rpa_activos_fijos/
 ├── logs/                       # Un log por ejecución (con timestamp)
 └── docs/
     ├── ESTADO_PROYECTO.md         # este archivo
+    ├── ARQUITECTURA_CODIGO.md     # cómo funciona el código, módulo por módulo (+ recetas)
     ├── PENDIENTES.md              # TODO lo que falta, detallado
     ├── GUIA_MODO_PRUEBAS.md       # paso a paso para probar + qué hace cada interruptor
     ├── CONFIGURACION_MANUAL.md    # lo que hay que conseguir/configurar a mano
@@ -239,6 +240,37 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-10-06 (2) — Nuevo [ARQUITECTURA_CODIGO.md](ARQUITECTURA_CODIGO.md):**
+  explicación clara del código (recorrido al presionar "Iniciar", mapa de
+  carpetas, cada módulo y sus funciones, conceptos clave, recetas para
+  cambios comunes y glosario). Mantenerlo al día cuando cambie la estructura.
+
+- **2026-10-06 — 1ª prueba real en SAP (modo solo SAP): la 2ª fila fallaba.
+  Arreglo: recargar la página entre filas + reintento ante elementos
+  vencidos.**
+  - Resultado de la prueba (usuario, 2026-10-05): entra a SAP (sesión ya
+    activa, sin pedir login), abre AS01, llena BIEN toda la 1ª fila y sale
+    sin guardar correctamente (Atrás + "no guardar"). Pero desde la 2ª fila:
+    `stale element reference: stale element not found in the current frame`
+    (en la barra de transacción y luego en "Sociedad"): SAP queda
+    redibujando la pantalla tras salir de la transacción y los elementos se
+    "vencen" entre encontrarlos y usarlos.
+  - Arreglo acordado con el usuario: se MANTIENE la salida sin guardar y,
+    antes de cada fila desde la 2ª, se **recarga la página** (F5): SAP
+    vuelve a su inicio limpio y se entra de nuevo con `/nAS01`. Nuevo
+    `SapWebGui.recargar()` (vuelve a la pestaña de SAP, `refresh()`, acepta
+    el aviso "¿Salir del sitio?" si apareciera —con un 2º intento si el
+    aviso canceló la recarga— y espera la barra o el login).
+  - Refuerzo: `SapWebGui._actuar()` — clic / escribir / transacción / leer
+    texto reintentan hasta `SAP_REINTENTOS_ELEMENTO_VENCIDO = 3` veces si el
+    elemento se vence. Errores de Selenium resumidos a UNA línea
+    (`_resumen()`), sin el stacktrace del navegador (en log y en "Código SAP").
+  - Pruebas: +4 en `test_sap_webgui.py` (recarga, aviso del navegador,
+    vencido que se recupera, vencido persistente con error corto) y
+    `test_sap_as01.py` verifica el orden "salir sin guardar → recargar →
+    /nAS01" → 83 OK.
+  - GUIA_MODO_PRUEBAS.md: paso de recarga, ajuste nuevo y errores nuevos.
 
 - **2026-10-05 (2) — Nuevo MODO PRUEBAS SOLO SAP (sin Appian).**
   - Motivo: poder probar la validación y AS01 en SAP cuando no hay

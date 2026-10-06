@@ -331,6 +331,13 @@ SAP_FORMULARIOS_POR_CASO = {
 # clic de una pestaña, y después de cambiar de pestaña.
 SAP_ESPERA_ENTRE_CLICS_SEG = 2
 
+# SAP web redibuja la pantalla con cada acción. Si un campo "se vence"
+# (StaleElementReference) entre encontrarlo y usarlo, se vuelve a buscar y se
+# reintenta hasta este número de veces. Además, ENTRE FILAS se recarga la
+# página (F5) para empezar cada activo con SAP limpio (1ª prueba real,
+# 2026-10-05: sin recargar, la 2ª fila fallaba con elementos vencidos).
+SAP_REINTENTOS_ELEMENTO_VENCIDO = 3
+
 # Formatos con los que se ESCRIBEN los valores en SAP. ⚠️ POR CONFIRMAR.
 SAP_FORMATO_FECHA = "%d.%m.%Y"     # ej. 05.10.2026 (columna G "Capitalizado el")
 SAP_SEPARADOR_DECIMAL = ","        # ej. 12,5 (solo para números con decimales)

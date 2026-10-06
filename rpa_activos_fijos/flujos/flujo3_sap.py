@@ -11,7 +11,10 @@ lista ordenada de pasos (campo / casilla / Enter / pestaña) con la columna
 del Excel y el XPath de cada campo.
 
 Por cada fila:
-  1. /n + transacción (pantalla limpia).
+  0. (desde la 2ª fila) recargar la página de SAP: SAP vuelve al inicio con
+     la página nueva y estable (sin esto, la 2ª fila fallaba con elementos
+     "vencidos", 1ª prueba real 2026-10-05).
+  1. /n + transacción.
   2. Llenar el formulario (celdas vacías no se tocan).
   3a. Si guardar_permitido(): Guardar -> leer el mensaje de la barra -> código
       del activo (ej. "El act.fj. 7129560 0 se ha creado" -> 7129560) o el
@@ -138,8 +141,13 @@ def cargar_a_sap(sap, solicitud, logger=None, esperar_continuar=None):
         )
 
     sap.asegurar_sesion()
-    for numero, fila in filas:
+    for indice, (numero, fila) in enumerate(filas):
         try:
+            if indice > 0:
+                # Entre filas: recargar la página (F5) para empezar con SAP
+                # limpio. Tras salir de la transacción, SAP queda redibujando
+                # y los campos se "vencen" (1ª prueba real, 2026-10-05).
+                sap.recargar()
             sap.ir_a_transaccion(transaccion)
             _llenar_formulario(sap, formulario, fila, case_id, numero, logger)
             if guardar:

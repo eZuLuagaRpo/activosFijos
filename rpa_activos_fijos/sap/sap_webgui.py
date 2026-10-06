@@ -16,11 +16,16 @@ Reglas aplicadas (las mismas que en el resto del bot):
 
 import time
 
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    UnexpectedAlertPresentException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 
 from config import (
+    SAP_REINTENTOS_ELEMENTO_VENCIDO,
     SAP_URL,
     SAP_XPATH_BARRA_TRANSACCION,
     SAP_XPATH_LOGIN_BOTON,
@@ -62,7 +67,7 @@ class SapWebGui:
                 self.logger.info("Abriendo SAP en una pestaña nueva: %s", SAP_URL)
             self.driver.get(SAP_URL)
         except Exception as e:
-            raise SapError(f"No se pudo abrir SAP ({SAP_URL}): {e}")
+            raise SapError(f"No se pudo abrir SAP ({SAP_URL}): {_resumen(e)}")
 
         self._iniciar_sesion_si_hace_falta()
 
@@ -109,6 +114,34 @@ class SapWebGui:
                 self.logger.warning("No se pudo volver a la pestaña de Appian: %s", e)
 
     # -- Acciones --------------------------------------------------------------
+    def recargar(self):
+        """
+        Recarga la página de SAP (F5): SAP vuelve a su pantalla inicial con la
+        página nueva y estable. Se usa ENTRE filas: tras salir de una
+        transacción, SAP queda redibujando y los elementos se "vencen"
+        (StaleElementReference) — confirmado en la 1ª prueba real (2026-10-05).
+        Si el navegador pregunta "¿Salir del sitio?", se acepta. Si tras
+        recargar SAP pidiera iniciar sesión, se vuelve a entrar.
+        """
+        self.ir_a_sap()
+        for intento in (1, 2):
+            try:
+                self.driver.switch_to.default_content()
+                self.driver.refresh()
+                break
+            except UnexpectedAlertPresentException as e:
+                # El navegador mostró un aviso y canceló la recarga: se acepta
+                # el aviso y se intenta una vez más.
+                self._aceptar_aviso_del_navegador()
+                if intento == 2:
+                    raise SapError(f"No se pudo recargar la página de SAP: {_resumen(e)}")
+            except Exception as e:
+                raise SapError(f"No se pudo recargar la página de SAP: {_resumen(e)}")
+        self._aceptar_aviso_del_navegador()
+        if self.logger:
+            self.logger.info("SAP: página recargada.")
+        self._iniciar_sesion_si_hace_falta()
+
     def ir_a_transaccion(self, codigo):
         """
         Escribe la transacción en la barra y presiona Enter. Se antepone
@@ -117,21 +150,19 @@ class SapWebGui:
         """
         if self.logger:
             self.logger.info("SAP: abriendo transacción %s.", codigo)
-        barra = self.esperar(SAP_XPATH_BARRA_TRANSACCION, "la barra de transacción")
-        try:
+
+        def escribir_codigo(barra):
             barra.click()
             barra.send_keys(Keys.CONTROL, "a")
             barra.send_keys(Keys.DELETE)
             barra.send_keys(f"/n{codigo}", Keys.ENTER)
-        except Exception as e:
-            raise SapError(f"No se pudo escribir la transacción {codigo}: {e}")
+
+        self._actuar(SAP_XPATH_BARRA_TRANSACCION, "la barra de transacción",
+                     escribir_codigo, f"No se pudo escribir la transacción {codigo}")
 
     def clic(self, lista_xpath, descripcion):
-        elemento = self.esperar(lista_xpath, descripcion)
-        try:
-            elemento.click()
-        except Exception as e:
-            raise SapError(f"No se pudo hacer clic en {descripcion}: {e}")
+        self._actuar(lista_xpath, descripcion, lambda elemento: elemento.click(),
+                     f"No se pudo hacer clic en {descripcion}")
 
     def doble_clic_lento(self, lista_xpath, descripcion, espera):
         """
@@ -149,7 +180,7 @@ class SapWebGui:
         try:
             self.driver.switch_to.active_element.send_keys(Keys.ENTER)
         except Exception as e:
-            raise SapError(f"No se pudo presionar Enter en SAP: {e}")
+            raise SapError(f"No se pudo presionar Enter en SAP: {_resumen(e)}")
 
     def existe(self, lista_xpath, segundos):
         """Espera hasta `segundos` a que aparezca el elemento. Devuelve el
@@ -162,22 +193,60 @@ class SapWebGui:
 
     def leer_texto(self, lista_xpath, descripcion):
         """Texto visible del elemento (espera a que aparezca)."""
-        elemento = self.esperar(lista_xpath, descripcion)
-        return (elemento.text or "").strip()
+        textos = []
+        self._actuar(lista_xpath, descripcion,
+                     lambda elemento: textos.append((elemento.text or "").strip()),
+                     f"No se pudo leer {descripcion}")
+        return textos[-1]
 
     def escribir(self, lista_xpath, texto, descripcion, registrar_valor=True):
         """Borra lo que tenga el campo, escribe `texto` y sale del campo (Tab)
         para que SAP registre el valor."""
-        elemento = self.esperar(lista_xpath, descripcion)
-        try:
+
+        def llenar(elemento):
             elemento.click()
             elemento.send_keys(Keys.CONTROL, "a")
             elemento.send_keys(Keys.DELETE)
             elemento.send_keys(texto, Keys.TAB)
-        except Exception as e:
-            raise SapError(f"No se pudo escribir en {descripcion}: {e}")
+
+        self._actuar(lista_xpath, descripcion, llenar, f"No se pudo escribir en {descripcion}")
         if self.logger and registrar_valor:
             self.logger.info("SAP: %s -> %s", descripcion, texto)
+
+    def _actuar(self, lista_xpath, descripcion, accion, mensaje_error):
+        """
+        Busca el elemento y le aplica `accion`. SAP web redibuja la pantalla
+        con cada acción: si el elemento se "vence" (StaleElementReference)
+        entre encontrarlo y usarlo, se vuelve a buscar y se reintenta, hasta
+        SAP_REINTENTOS_ELEMENTO_VENCIDO veces.
+        """
+        for intento in range(1, SAP_REINTENTOS_ELEMENTO_VENCIDO + 1):
+            elemento = self.esperar(lista_xpath, descripcion)
+            try:
+                accion(elemento)
+                return
+            except StaleElementReferenceException as e:
+                if intento == SAP_REINTENTOS_ELEMENTO_VENCIDO:
+                    raise SapError(f"{mensaje_error}: {_resumen(e)}")
+                if self.logger:
+                    self.logger.warning(
+                        "SAP redibujó la pantalla mientras se usaba %s; se vuelve a "
+                        "buscar (intento %s de %s).",
+                        descripcion, intento + 1, SAP_REINTENTOS_ELEMENTO_VENCIDO,
+                    )
+                time.sleep(1)
+            except Exception as e:
+                raise SapError(f"{mensaje_error}: {_resumen(e)}")
+
+    def _aceptar_aviso_del_navegador(self):
+        """Si el navegador muestra "¿Salir del sitio?" (u otro aviso) al
+        recargar, lo acepta. Si no hay aviso, no hace nada."""
+        try:
+            WebDriverWait(self.driver, 3).until(lambda d: d.switch_to.alert).accept()
+            if self.logger:
+                self.logger.info("SAP: se aceptó el aviso del navegador al recargar.")
+        except Exception:
+            pass
 
     # -- Búsqueda de elementos (con iframes y respaldos) ------------------------
     def esperar(self, lista_xpath, descripcion):
@@ -241,3 +310,11 @@ class SapWebGui:
                                         indice, xpath)
                 return elementos[0]
         return None
+
+
+def _resumen(error):
+    """Primera línea del error de Selenium (sin el stacktrace del navegador)."""
+    texto = str(error).strip()
+    if texto.startswith("Message:"):
+        texto = texto[len("Message:"):].strip()
+    return texto.splitlines()[0] if texto else type(error).__name__

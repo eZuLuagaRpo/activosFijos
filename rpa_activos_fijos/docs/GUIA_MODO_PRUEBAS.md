@@ -76,6 +76,11 @@ nuevo.
      *"Esperando revisión en SAP"*. Revisa el formulario en SAP con calma.
   5. Al presionar **Continuar**, el bot sale **sin guardar** (Atrás dos veces
      + "salir sin guardar") y pasa al siguiente activo.
+  6. Antes de cada activo (desde el segundo) **recarga la página de SAP**
+     (como F5): SAP vuelve a su inicio con la pantalla limpia y el bot entra
+     de nuevo a `AS01`. Sin esto, en la 1ª prueba real la segunda fila
+     fallaba con *"stale element reference"* (SAP queda redibujando la
+     pantalla después de salir de la transacción).
 - Si algo falla en una fila (ej. un campo que no aparece), lo anota en el
   log y **sigue con la siguiente fila**.
 
@@ -114,6 +119,7 @@ Y unos **ajustes** de SAP (no son de seguridad):
 |---|---|---|
 | `SAP_FORMULARIO_AS01_BRP` | (campos capturados) | Qué columna del Excel va en qué campo de AS01, en qué orden y en qué pestaña |
 | `SAP_ESPERA_ENTRE_CLICS_SEG` | `2` | Segundos entre los dos clics de cada pestaña (y al salir sin guardar). Súbelo si SAP no alcanza a cambiar de pestaña |
+| `SAP_REINTENTOS_ELEMENTO_VENCIDO` | `3` | Si SAP redibuja la pantalla justo cuando el bot va a usar un campo, el bot lo vuelve a buscar hasta este número de veces |
 | `SAP_FORMATO_FECHA` | `%d.%m.%Y` (05.10.2026) | Cómo se escribe la fecha G "Capitalizado el" — **por confirmar** |
 | `SAP_SEPARADOR_DECIMAL` | `,` | Separador de decimales al escribir números — **por confirmar** |
 
@@ -267,6 +273,8 @@ INFO    | SAP: fila 2, A (Clase de activo fijo) -> BRP01
 ...                                                          (un renglón por campo)
 WARNING | Caso PDA-7889, fila 2: formulario de AS01 lleno. NO se guarda. Revisa SAP y presiona 'Continuar'.
         <- aquí el bot ESPERA tu clic en "Continuar (sin guardar)"
+INFO    | SAP: página recargada.
+INFO    | SAP: sesión ya activa.
 INFO    | SAP: abriendo transacción AS01.
 ...                                                          (fila 3)
 INFO    | Caso PDA-7889 procesado correctamente (Revisado en SAP SIN guardar (2 fila(s))).
@@ -488,6 +496,9 @@ INFO    | Omitidos:         1
 | `MODO SOLO SAP: 0 archivo(s) para probar: NINGUNO` | No hay archivos con el formato `<id>_<tipo>_<accion>.xlsx` | Revisa el nombre (sección 5, Paso 2) y la carpeta |
 | `MODO SOLO SAP: '...' no sigue el formato ... se omite` | Ese archivo tiene otro nombre | Renómbralo, o ignóralo si no es de esta prueba |
 | El bot no avanza y el estado dice *"Esperando revisión en SAP"* | Es la pausa de supervisión, a propósito | Revisa SAP y presiona **"Continuar (sin guardar)"** |
+| Aviso `SAP redibujó la pantalla mientras se usaba ...; se vuelve a buscar (intento N de 3)` | SAP cambió la pantalla justo cuando el bot iba a escribir | Nada: el bot lo reintenta solo. Si pasa mucho, súbelo en `SAP_REINTENTOS_ELEMENTO_VENCIDO` |
+| `fila N: ... stale element reference ...` | SAP siguió redibujando después de los reintentos | Avísalo con el log: puede requerir más espera en ese paso |
+| `No se pudo recargar la página de SAP` | El navegador no pudo recargar (o un aviso lo impidió) | Revisa la pestaña de SAP; el bot sigue con la siguiente fila |
 | `fila N: SAP: no apareció ... tras 120s` | Un campo / pestaña de AS01 no apareció (XPath distinto, o SAP mostró un aviso) | Mira la pantalla de SAP y la barra de abajo; ajusta el XPath en `SAP_FORMULARIO_AS01_BRP`. El bot ya siguió con la siguiente fila |
 | `SAP: no apareció la pantalla inicial de SAP (barra de transacción o login)` | SAP no cargó, o la pantalla de login usa otros IDs | Revisa que la URL abra a mano. Si pide login, captura los XPath de usuario, clave y botón y ponlos en `SAP_XPATH_LOGIN_*` (hoy son los estándar, **por confirmar**) |
 | `No se pudo salir del formulario sin guardar` | No apareció el botón Atrás o la ventana de confirmación | Revisa `SAP_XPATH_BOTON_ATRAS` / `SAP_XPATH_CONFIRMAR_SALIR_SIN_GUARDAR` |
@@ -515,7 +526,8 @@ INFO    | Omitidos:         1
   `cargar_a_sap()` (fila por fila con el formulario de `config.py`),
   `_supervisar()` / `_salir_sin_guardar()`, `escribir_columna_codigo_sap()`.
   `sap/sap_webgui.py` → pestaña, login, transacción, clic, doble clic lento,
-  Enter, escritura (con iframes y respaldos). Botón "Continuar":
+  Enter, escritura (con iframes y respaldos), `recargar()` entre filas y
+  `_actuar()` (reintento ante elementos vencidos; errores en una sola línea). Botón "Continuar":
   `ui/views/console_view.py` (`_esperar_continuar`, aviso por la cola).
 - Con el switch en `False` el comportamiento es exactamente el del flujo
   real (hay una prueba automática que lo verifica aunque existan archivos en
