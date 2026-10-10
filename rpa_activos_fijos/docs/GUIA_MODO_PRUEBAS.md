@@ -196,6 +196,13 @@ El nombre debe ser **solo el número**, sin nada más:
 **Solo un archivo por solicitud.** Si dejas `PDA-7889.xlsm` y `PDA-7889.xlsx`
 a la vez, el bot marca error y no adivina cuál usar.
 
+> **Caso especial BRP (modificación + creación):** si la solicitud real es
+> "Activos BRP → Crear" con 2 Excel, deja **dos** archivos de prueba:
+> `PDA-7889.xlsx` y `PDA-7889_modificacion.xlsx`. El bot identifica cuál es
+> cuál **por su contenido** (encabezados), no por el nombre: primero hace la
+> modificación (AS02) y luego la creación (AS01). Los adjuntos reales de
+> Appian se descargan igual, pero no se usan.
+
 ### Paso 4 — Pon el archivo en `downloads_test/`
 
 Copia tu(s) archivo(s) a:
@@ -362,11 +369,36 @@ Como no hay solicitud de Appian, el bot saca el activo y la acción del
 
 - La **primera parte** es libre (sirve para reconocer la prueba en el log;
   puede tener guiones bajos).
-- **Hoy solo funciona `_brp_creacion`**. Cuando se configuren otras
-  acciones serán, por ejemplo, `_brp_modificacion` o `_brp_eliminacion`.
+- **Hoy funcionan `_brp_creacion` (AS01) y `_brp_modificacion` (AS02).**
+  Cuando se configuren otras acciones será, por ejemplo, `_brp_eliminacion`.
+- Para **modificación** el Excel debe partir de
+  `plantillas/BRP/Plantilla Modificacion BRP.xlsm` (columnas A..BO;
+  obligatorios A código del activo y C sociedad; B subnúmero opcional) y
+  llamarse, por ejemplo, `prueba1_brp_modificacion.xlsm`. El bot abre
+  `AS02`, escribe activo / subnúmero / sociedad, da Enter y en el formulario
+  **solo cambia los campos cuya celda trae valor** (los vacíos conservan lo
+  que ya tiene el activo). ⚠️ La plantilla oficial trae **1712 filas de
+  datos**: para probar, deja solo 2 o 3 filas, o tendrás que presionar
+  "Continuar" 1712 veces.
 - Puedes dejar **varios** archivos: se procesan en orden alfabético.
+- **Caso especial BRP (modificación + creación):** dos archivos con la
+  **misma primera parte**, ej. `prueba1_brp_modificacion.xlsm` y
+  `prueba1_brp_creacion.xlsx`, se toman como **una sola solicitud**: PASO 1
+  modificación (AS02, todas sus filas) y PASO 2 creación (AS01, todas sus
+  filas), recargando la página entre cada activo. Un archivo sin pareja se
+  procesa solo, como siempre.
 - Los archivos con otro nombre se **omiten** (aparecen en el log y en
   "Omitidos").
+
+**Resumen: qué nombre poner según lo que quieres probar (BRP):**
+
+| Quiero probar | Archivo(s) en `downloads_test/` | Plantilla de la que parte | Qué hace el bot |
+|---|---|---|---|
+| Creación | `prueba1_brp_creacion.xlsx` | `Plantilla Creación Activos BRP usuario.xlsm` (con AC) | AS01 fila por fila |
+| Modificación | `prueba2_brp_modificacion.xlsx` | `Plantilla Modificacion BRP.xlsm` | AS02 fila por fila |
+| Caso especial (modificar + crear) | `prueba3_brp_modificacion.xlsx` **y** `prueba3_brp_creacion.xlsx` (misma primera parte) | Una de cada una | PASO 1 AS02 (todas sus filas) → PASO 2 AS01 (todas sus filas) |
+
+Puedes dejar los tres casos a la vez: cada uno es una "solicitud" distinta.
 
 ### Paso 3 — Ponlo en `downloads_test/`
 
@@ -493,6 +525,9 @@ INFO    | Omitidos:         1
 | `La plantilla no tiene filas de datos` | Solo tiene encabezados | Llenar al menos una fila desde la 2 |
 | `Aún no hay validación implementada para (tipo='prj', ...)` | La solicitud real no es BRP – Creación | Usar una solicitud de BRP – Creación |
 | `MODO_PRUEBAS_REEMPLAZO y MODO_PRUEBAS_SOLO_SAP están encendidos a la vez` | Los dos modos están en `True` | Deja solo uno en `True` |
+| `CASO ESPECIAL (2 Excel). PASO 1 brp/modificacion: ... | PASO 2 brp/creacion: ...` | Se detectó el caso especial BRP | Nada: es informativo |
+| `trae 2 Excel (...), pero no se pudo identificar uno de brp/modificacion y uno de brp/creacion` | Los 2 Excel no son uno de cada plantilla (ej. los dos de creación, o uno en formato viejo) | Revisar los adjuntos: uno debe ser la plantilla de modificación y otro la de creación |
+| `PASO 1 (modificación) AS02: N de M fila(s) con error ... NO se hizo el PASO 2` | Falló la modificación de algún activo y, por seguridad, no se creó nada | Revisa el log de esas filas. Si se decide crear igual, existe `CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION` en `config.py` |
 | `MODO SOLO SAP: 0 archivo(s) para probar: NINGUNO` | No hay archivos con el formato `<id>_<tipo>_<accion>.xlsx` | Revisa el nombre (sección 5, Paso 2) y la carpeta |
 | `MODO SOLO SAP: '...' no sigue el formato ... se omite` | Ese archivo tiene otro nombre | Renómbralo, o ignóralo si no es de esta prueba |
 | El bot no avanza y el estado dice *"Esperando revisión en SAP"* | Es la pausa de supervisión, a propósito | Revisa SAP y presiona **"Continuar (sin guardar)"** |

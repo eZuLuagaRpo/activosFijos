@@ -108,7 +108,8 @@ rpa_activos_fijos/
 │   ├── router.py             (activo, acción) → qué validador usar
 │   ├── base_validador.py     motor común de validación
 │   └── plantillas/
-│       └── brp_creacion.py   columnas y reglas de BRP – Creación
+│       ├── brp_creacion.py   columnas y reglas de BRP – Creación (AS01)
+│       └── brp_modificacion.py columnas y reglas de BRP – Modificación (AS02)
 │
 ├── sap/
 │   └── sap_webgui.py     ← cómo "mover" SAP en el navegador
@@ -153,9 +154,9 @@ Secciones principales:
 | Negocio | acciones (`ACCION_*`), tipos de activo (`TIPO_*`), `ALIAS_ACCION` |
 | Detalle del caso | XPath de la sección "Detalles" y sus 6 renglones |
 | SAP | `SAP_URL`, login, barra de transacción, `SAP_TRANSACCION_POR_CASO` |
-| Formularios SAP | `SAP_FORMULARIO_AS01_BRP` (columna → campo), `SAP_FORMULARIOS_POR_CASO` |
+| Formularios SAP | Catálogo único de campos `SAP_CAMPOS_ACTIVO` y pestañas `SAP_PESTANAS_ACTIVO` (XPath compartidos por AS01 y AS02); formularios `SAP_FORMULARIO_AS01_BRP` y `SAP_FORMULARIO_AS02_BRP` (columna → campo del catálogo); `SAP_FORMULARIOS_POR_CASO` |
 | Ajustes SAP | esperas entre clics, reintentos, formato de fecha y decimales |
-| Seguridad SAP | `SAP_GUARDAR_REAL`, `SAP_XPATH_MENSAJE_ESTADO` |
+| Seguridad SAP | `SAP_GUARDAR_REAL`, `SAP_XPATH_MENSAJE_ESTADO`, `SAP_REGEX_EXITO_POR_TRANSACCION` (sin mensaje de éxito de una transacción, nunca se guarda en ella) |
 | Respuesta Appian | `RESPUESTA_XPATH_*`, `APPIAN_RESPONDER_REAL` |
 
 > **Selectores en lista.** Casi todos los XPath son **listas**
@@ -248,9 +249,14 @@ Secciones principales:
 4. Lee la sección **"Detalles"** y saca qué activo trae acción y cuál es
    (`_extraer_tipo_y_accion_detalle`). Los vacíos de Appian son guiones
    ("–", "-", "—").
-5. Toma el único Excel adjunto (`_tomar_excel`); si no hay, intenta un clic
-   de respaldo (`_descargar_adjunto_manual`).
-6. Lo renombra a `PDA-7889_brp_creacion.xlsx` (`_normalizar_nombre_excel`).
+5. Toma los Excel adjuntos (`_excels_adjuntos`); si no hay, intenta un clic
+   de respaldo (`_descargar_adjunto_manual`). Decide cuál usar
+   (`_asignar_excels`): **1 Excel** → solicitud normal; **2 Excel** en el
+   caso especial BRP (`CASOS_DOS_ARCHIVOS`) → identifica cuál es el de
+   modificación y cuál el de creación **por sus encabezados**
+   (`router.identificar_plantilla`); cualquier otro caso → revisión manual.
+6. Los renombra a `PDA-7889_brp_creacion.xlsx` (y
+   `PDA-7889_brp_modificacion.xlsx` en el caso especial).
 7. (Modo reemplazo) usa una copia de tu archivo (`_usar_archivo_prueba`).
 8. Devuelve una `Solicitud`.
 
@@ -258,13 +264,20 @@ Los pasos lentos van envueltos en **reintentos** (`core/retry.py`).
 
 #### `flujo2_validar.py` — Flujo 2: validar el Excel
 
+En el caso especial valida **primero** el Excel de modificación y luego el
+de creación: si cualquiera falla, nada va a SAP.
 `validar_solicitud(solicitud)` pide al router el validador del activo/acción,
 valida, escribe en el log cada error/aviso por fila (`_registrar_detalle`) y,
 si la plantilla no es válida, lanza `PlantillaInvalidaError` (**todo o nada**).
 
 #### `flujo3_sap.py` — Flujo 3: SAP fila por fila
 
-`cargar_a_sap(sap, solicitud, esperar_continuar)`:
+`cargar_a_sap(sap, solicitud, esperar_continuar)` revisa primero la
+configuración de todo y luego trabaja cada Excel con `_trabajar_archivo`.
+En el **caso especial BRP** son dos: PASO 1 todas las filas de modificación
+(AS02) y PASO 2 todas las de creación (AS01). Si el PASO 1 tiene errores y
+`CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION = False`, no se hace el PASO 2.
+Por cada Excel:
 
 1. Busca la transacción y el **formulario** de ese activo/acción en
    `config.py`. Si no hay formulario, deja el caso "pendiente" sin entrar a SAP.
@@ -294,7 +307,9 @@ de SAP.
 
 #### `modo_solo_sap.py` — modo de prueba sin Appian
 
-Reemplaza al Flujo 1 cuando `MODO_PRUEBAS_SOLO_SAP = True`:
+Reemplaza al Flujo 1 cuando `MODO_PRUEBAS_SOLO_SAP = True` (y une
+`<id>_brp_modificacion` + `<id>_brp_creacion` en una sola solicitud del caso
+especial):
 `listar_archivos()` toma los Excel de `downloads_test/` y saca el activo y la
 acción **del nombre** (`interpretar_nombre("prueba1_brp_creacion.xlsx")` →
 `("prueba1", "brp", "creacion")`).
@@ -319,6 +334,9 @@ plantilla**.
     max_largo, largo_es_error)`; los tipos son `OBLIGATORIO`, `CONDICIONAL`,
     `INFORMATIVO`, `NO_SE_VALIDA`.
   - "Vacío" = sin contenido, solo espacios o `0` (`es_vacia`).
+- **`plantillas/brp_modificacion.py` (`ValidadorBrpModificacion`)**: las 67
+  columnas (A..BO) de la plantilla de modificación; obligatorios A (código
+  del activo) y C (sociedad); B opcional; el resto informativo.
 - **`plantillas/brp_creacion.py` (`ValidadorBrpCreacion`)**: la lista de las
   29 columnas (A..AC) y dos reglas propias: cantidad (C) = 1 y vehículo (si
   hay matrícula M, el modelo U es obligatorio).
@@ -371,6 +389,11 @@ hizo el bot.
 
 | Archivo | Qué comprueba |
 |---|---|
+| `test_validacion_brp_modificacion.py` | La plantilla de modificación (la oficial valida tal cual; A y C obligatorias; B opcional; la de creación no sirve) |
+| `test_sap_formularios.py` | Los formularios de `config.py`: **AS01 igual a la "foto" tomada antes de reorganizar**, coherencia de cada formulario con su plantilla, XPath de AS02 |
+| `test_modificacion_brp_sola.py` | "BRP → Modificar" con un solo Excel: Flujo 1 detecta Modificar, 2 Excel van a revisión manual, modo reemplazo, plantilla de creación rechazada, orquestador de punta a punta con AS02 |
+| `test_caso_especial_brp.py` | El caso especial BRP: identificar los 2 Excel por contenido, validar ambos, AS02 y luego AS01, no crear si falla la modificación, modo reemplazo y solo SAP |
+| `test_sap_as02.py` | El llenado de AS02 con un SAP falso: pantalla inicial, solo celdas con valor, 6 pestañas, nunca guarda |
 | `test_validacion_brp_creacion.py` | Todas las reglas de la plantilla BRP (obligatorios, vacíos, cantidad, vehículos, largos, columna AC, formatos, columnas corridas…) |
 | `test_modo_pruebas_reemplazo.py` | El modo reemplazo: usa tu archivo, omite lo que no tiene archivo, no daña nada |
 | `test_modo_solo_sap.py` | El modo solo SAP: nombres de archivo, no entra a Appian, nunca guarda |
@@ -404,13 +427,20 @@ hizo el bot.
 Solo en `config.py`. Si quieres conservar el viejo, déjalo como **respaldo**
 en la lista: `["nuevo", "viejo"]`.
 
-### Agregar o corregir un campo del formulario de AS01
-En `config.py`, `SAP_FORMULARIO_AS01_BRP`, agrega o edita una línea en el
-lugar correcto del orden:
-```python
-{"tipo": "campo", "columna": "E", "nombre": "Marca", "xpath": ['//*[@id="..."]']},
-```
-Tipos de paso: `campo`, `casilla`, `enter`, `pestana`.
+### Agregar o corregir un campo del formulario de AS01 / AS02
+Los XPath del formulario del activo están **una sola vez** en
+`SAP_CAMPOS_ACTIVO` (`config.py`), porque AS01 y AS02 usan el mismo
+formulario.
+- **Cambió el XPath de un campo:** corrígelo en `SAP_CAMPOS_ACTIVO`; queda
+  corregido en AS01 y AS02 a la vez.
+- **Llenar un campo que ya está en el catálogo:** en el formulario
+  (`SAP_FORMULARIO_AS01_BRP` o `SAP_FORMULARIO_AS02_BRP`), en su pestaña,
+  agrega `_campo("COLUMNA", "clave")` (o `_casilla(...)` si es casilla).
+- **Campo nuevo:** agrégalo primero al catálogo
+  (`"clave": ("Nombre", ['//*[@id="..."]'])`) y luego úsalo en el formulario.
+- Pestañas: `_pestana(n)`; Enter: `_ENTER_FORMULARIO`.
+- Corre las pruebas: `test_sap_formularios.py` avisa si una columna no existe
+  en la plantilla o se usa dos veces.
 
 ### SAP es lento y no alcanza a cambiar de pestaña
 Sube `SAP_ESPERA_ENTRE_CLICS_SEG` en `config.py`.

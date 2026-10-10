@@ -72,6 +72,8 @@ credenciales de Appian, presiona **Ejecutar** y ve el avance en una consola en v
 | SAP: formulario AS01 por configuración (BRP – Creación) | ✅ Hecho (3 dudas abiertas, PENDIENTES P3) |
 | SAP: supervisión (se detiene antes de Guardar + botón "Continuar (sin guardar)") | ✅ Hecho |
 | SAP: leer código / error y columna "Código SAP" | ✅ Código listo · 🔲 falta XPath del mensaje (P5) |
+| BRP – Modificación (AS02): plantilla + formulario | ✅ Hecho (dudas abiertas, PENDIENTES P13) · sin guardar |
+| BRP – Caso especial "modificar + crear" (2 Excel) | ✅ Hecho sin guardar (falta: política si falla la modificación y qué se devuelve, P13) |
 | Bitácora de estado por solicitud y por fila | 🔲 Pendiente (prioritaria) |
 | Respuesta en Appian | 🔲 Pendiente (selectores capturados) |
 | Orquestador + resumen final | ✅ Hecho |
@@ -240,6 +242,76 @@ la usuaria. Ver detalles y advertencias (driver de Edge, antivirus) en
 ## 7. Changelog
 
 > Añade aquí una línea **cada vez** que cambies algo.
+
+- **2026-10-11 — BRP Modificación "sola" + doble chequeo de los 3 flujos BRP.**
+  - "Activos BRP → Modificar" con UN Excel ya funcionaba con lo existente
+    (alias "modificar", validador, AS02, recarga): verificado sin cambiar
+    código. Nuevo `tests/test_modificacion_brp_sola.py` (Flujo 1 con
+    "Modificar", 2 Excel → revisión manual, modo reemplazo, plantilla de
+    creación rechazada, orquestador de punta a punta, regresión de creación).
+  - Doble chequeo: 150 pruebas OK; simulación modo solo SAP con los 3
+    escenarios a la vez (creación, modificación, caso especial) → AS01,
+    AS01 | AS02, AS01 | AS02; nunca Guardar (aun con SAP_GUARDAR_REAL=True).
+  - GUIA_MODO_PRUEBAS: tabla de nombres de archivo por escenario.
+
+- **2026-10-10 — Caso especial BRP "modificación + creación" (2 Excel).**
+  - Negocio: Appian dice "Activos BRP → Crear" pero llegan 2 Excel. PASO 1:
+    AS02 con la plantilla de modificación (actualizar el número de
+    inventario; la columna G ya trae el valor final con T1/T2/T3; los demás
+    campos con valor también se llenan). PASO 2: AS01 con la plantilla de
+    creación, igual que la creación normal. Recargar página tras cada activo.
+    Respuesta en Appian igual que la creación.
+  - `config.py`: `CASOS_DOS_ARCHIVOS = {(brp, creacion): (brp, modificacion)}`
+    y `CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION = False` (si falla alguna
+    modificación, no se crea; POR CONFIRMAR).
+  - Identificación por CONTENIDO: `BaseValidador.reconoce_encabezados()` y
+    `router.identificar_plantilla()`.
+  - Flujo 1: `_tomar_excel` → `_excels_adjuntos` + `_asignar_excels` (1 Excel
+    = igual que siempre; 2 en el caso especial = se identifican; otro caso =
+    `MultiplesAdjuntosError` como antes). Modo reemplazo: segundo archivo
+    `PDA-7889_modificacion.xlsx`; en ese modo los adjuntos reales ya no
+    bloquean aunque sean varios (no se usan).
+  - Modelo: `Solicitud.excel_modificacion` y `resultados_sap_modificacion`.
+  - Flujo 2: valida los DOS (primero modificación); cualquiera inválido →
+    `PlantillaInvalidaError` con "PASO 1 (modificación)" / "PASO 2 (creación)".
+  - Flujo 3: `cargar_a_sap` revisa la configuración de todo antes de tocar SAP
+    y trabaja cada Excel con `_trabajar_archivo` (recarga entre TODOS los
+    activos, también al pasar de AS02 a AS01). Con un solo Excel, los textos y
+    acciones son idénticos a antes (pruebas existentes sin cambios).
+  - Modo solo SAP: `<id>_brp_modificacion` + `<id>_brp_creacion` = una sola
+    solicitud del caso especial.
+  - Pruebas: +17 (`tests/test_caso_especial_brp.py`) → 144 OK.
+
+- **2026-10-09 — BRP – Modificación (AS02) + catálogo único de campos SAP.**
+  - Contexto: BRP tiene un caso especial (Appian dice "Crear" pero llegan 2
+    Excel: primero se MODIFICA y luego se CREA); la lógica la explica el
+    usuario después. Primero se configura AS02.
+  - `config.py` reorganizado SIN cambiar AS01: los XPath del formulario del
+    activo (iguales en AS01 y AS02, confirmado por el usuario) quedan UNA vez
+    en `SAP_CAMPOS_ACTIVO` + `SAP_PESTANAS_ACTIVO`; los formularios usan
+    `_campo(columna, clave)`, `_casilla(...)`, `_pestana(n)`. Prueba
+    `test_as01_no_cambio_con_la_reorganizacion`: los 29 pasos de AS01 son
+    idénticos a una "foto" tomada antes del cambio.
+  - Nuevo `SAP_FORMULARIO_AS02_BRP` (64 pasos): A activo fijo / B subnúmero /
+    C sociedad → Enter → campos comunes + extras (número de serie, último
+    inventario, nota, descapitalización, pedido, local, n.º personal, PEP,
+    total depreciados, casillas AD/AE, sociedad GL, país, activo orig., alta,
+    año, valor original, val. patrim., datos registrales, pestaña 6: clase,
+    póliza, comentario, inicio). `SAP_TRANSACCION_POR_CASO[(brp,
+    modificacion)] = AS02`. Se retiraron los selectores viejos
+    `SAP_AS02_XPATH_*` (eran del paso obsoleto de la masiva).
+  - Nuevo `validacion/plantillas/brp_modificacion.py` (67 columnas A..BO; A y
+    C obligatorios; B opcional) registrado en el router. La plantilla
+    oficial (con sus 1712 filas) valida tal cual.
+  - Seguridad: `SAP_REGEX_EXITO_POR_TRANSACCION` — solo AS01 tiene mensaje de
+    éxito; en cualquier transacción sin él (hoy AS02) el bot NUNCA guarda.
+    `_guardar_y_leer` y el resumen son genéricos por transacción.
+  - Pruebas: +44 (`test_sap_formularios.py`, `test_validacion_brp_modificacion.py`,
+    `test_sap_as02.py`) → 127 OK; las 83 anteriores sin cambios. Simulación
+    solo SAP con un archivo de creación y uno de modificación: AS01, AS02,
+    AS02; nunca Guardar.
+  - Docs: GUIA_MODO_PRUEBAS (archivos `_brp_modificacion`), ARQUITECTURA_CODIGO
+    (catálogo y recetas), PENDIENTES P13 (dudas).
 
 - **2026-10-06 (2) — Nuevo [ARQUITECTURA_CODIGO.md](ARQUITECTURA_CODIGO.md):**
   explicación clara del código (recorrido al presionar "Iniciar", mapa de

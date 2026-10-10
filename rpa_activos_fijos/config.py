@@ -164,6 +164,25 @@ ALIAS_ACCION = {
     "baja": ACCION_ELIMINACION,
 }
 
+# CASO ESPECIAL "DOS ARCHIVOS" (2026-10-10). Si una solicitud de la clave trae
+# 2 Excel, uno es de la acción indicada en el valor y se hace PRIMERO.
+#   BRP: Appian dice "Activos BRP -> Crear" pero llegan 2 Excel:
+#     PASO 1: el de MODIFICACIÓN (AS02) — actualizar el número de inventario
+#             (el usuario ya trae el valor final con el sufijo T1/T2/T3).
+#     PASO 2: el de CREACIÓN (AS01) — igual que una creación normal.
+# Cuál archivo es cuál se decide por su CONTENIDO (encabezados de la
+# plantilla), no por el nombre. Con UN solo Excel, la solicitud es normal.
+CASOS_DOS_ARCHIVOS = {
+    (TIPO_BRP, ACCION_CREACION): (TIPO_BRP, ACCION_MODIFICACION),
+}
+
+# Si en el PASO 1 alguna fila falla, ¿se hace igual el PASO 2?
+#   False (por defecto, lo más seguro): NO se crea nada y la solicitud queda
+#         fallida para revisión (los activos nuevos usan el número de
+#         inventario que libera la modificación). ⚠️ POR CONFIRMAR con negocio.
+#   True: se crea igual.
+CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION = False
+
 
 # ---------------------------------------------------------------------------
 # DETALLE DEL CASO — SECCIÓN "Detalles" (tipo de activo + acción)
@@ -256,8 +275,11 @@ SAP_TX_BORRAR = "AS06"             # borrar activo fijo
 # Qué transacción usa cada (tipo, acción).
 # BRP - Creación: solo AS01 (AS01 tiene el campo "TXT.NUM.PRAL.AF", así que la
 # columna AC se escribe al crear; ya NO hay paso por AS02).
+# BRP - Modificación: AS02 (2026-10-09). Plantilla propia:
+# plantillas/BRP/Plantilla Modificacion BRP.xlsm.
 SAP_TRANSACCION_POR_CASO = {
     (TIPO_BRP, ACCION_CREACION): SAP_TX_CREAR,
+    (TIPO_BRP, ACCION_MODIFICACION): SAP_TX_MODIFICAR,
 }
 
 # --- Formularios (columna del Excel -> campo de SAP) ---------------------------
@@ -274,6 +296,111 @@ SAP_TRANSACCION_POR_CASO = {
 #        -> cambia de pestaña con DOS clics separados por
 #           SAP_ESPERA_ENTRE_CLICS_SEG (uno solo no funciona; SAP es lento).
 # Agregar / corregir un campo = tocar una línea aquí, sin programar.
+# Solo se llenan los campos de la lista: columnas del Excel sin campo se
+# ignoran, y campos sin columna no se tocan (decisión del usuario, 2026-10-05).
+
+# --- Catálogo: campos del formulario del ACTIVO (compartido AS01 / AS02) -------
+# AS01 (crear) y AS02 (modificar) abren EL MISMO formulario, con los MISMOS
+# XPath (confirmado por el usuario, 2026-10-09); solo cambia la pantalla
+# inicial. Por eso cada XPath se define UNA sola vez aquí, con un nombre, y los
+# formularios de abajo solo dicen qué COLUMNA va en qué campo.
+#   clave: (nombre para el log, [XPath principal, respaldos...])
+SAP_CAMPOS_ACTIVO = {
+    # Pestaña 1 (la que se abre al dar Enter)
+    "denominacion": ("Denominación", ['//*[@id="M0:46:3:1:2B256:1::1:22"]']),
+    "txt_num_pral_af": ("TXT.NUM.PRAL.AF", ['//*[@id="M0:46:3:1:2B256:1::3:22"]']),
+    "numero_serie": ("Número de serie", ['//*[@id="M0:46:3:1:2B256:1::5:22"]']),
+    "numero_inventario": ("Número de inventario", ['//*[@id="M0:46:3:1:2B256:1::6:22"]']),
+    "cantidad": ("Cantidad", ['//*[@id="M0:46:3:1:2B256:1::7:22"]']),
+    "ultimo_inventario_el": ("Último inventario el", ['//*[@id="M0:46:3:1:2B256:2::1:22"]']),
+    "nota_inventario": ("Nota de inventario", ['//*[@id="M0:46:3:1:2B256:2::2:22"]']),
+    "capitalizado_el": ("Capitalizado el", ['//*[@id="M0:46:3:1:2B256:3::1:22"]']),
+    "descapitalizado_el": ("Descapitalización el", ['//*[@id="M0:46:3:1:2B256:3::1:67"]']),
+    "pedido_el": ("Pedido el", ['//*[@id="M0:46:3:1:2B256:3::3:67"]']),
+    # Pestaña 2
+    "centro_coste": ("Centro de coste", ['//*[@id="M0:46:3:1:2B257:1::1:22"]']),
+    "ceco_responsable": ("CeCo responsable", ['//*[@id="M0:46:3:1:2B257:1::2:22"]']),
+    "orden_costes": ("Orden costes", ['//*[@id="M0:46:3:1:2B257:1::3:22"]']),
+    "centro": ("Centro", ['//*[@id="M0:46:3:1:2B257:1::5:22"]']),
+    "emplazamiento": ("Emplazamiento", ['//*[@id="M0:46:3:1:2B257:1::6:22"]']),
+    "local": ("Local", ['//*[@id="M0:46:3:1:2B257:1::7:22"]']),
+    "matricula": ("Matrícula vehículo", ['//*[@id="M0:46:3:1:2B257:1::8:22"]']),
+    "numero_personal": ("Número de personal", ['//*[@id="M0:46:3:1:2B257:1::9:22"]']),
+    "elem_pep": ("Elem. PEP (costes)", ['//*[@id="M0:46:3:1:2B257:1::10:22"]']),
+    "activo_paralizado": ("Activo fijo paralizado", ['//*[@id="M0:46:3:1:2B257:1::12:1-txt"]']),  # casilla
+    # Pestaña 3
+    "estado": ("Estado", ['//*[@id="M0:46:3:1:2B258:1::1:22"]']),
+    "tipo": ("Tipo", ['//*[@id="M0:46:3:1:2B258:1::2:22"]']),
+    "procedencia": ("Procedencia", ['//*[@id="M0:46:3:1:2B258:1::3:22"]']),
+    "ubicacion": ("Ubicación", ['//*[@id="M0:46:3:1:2B258:1::4:22"]']),
+    "total_depreciados": ("Total depreciados", ['//*[@id="M0:46:3:1:2B258:1::5:22"]']),
+    # Pestaña 4
+    "acreedor": ("Acreedor", ['//*[@id="M0:46:3:1:2B259:1::1:23"]']),
+    "fabricante": ("Fabricante", ['//*[@id="M0:46:3:1:2B259:1::2:23"]']),
+    "af_comprado_nuevo": ("AF comprado nuevo", ['//*[@id="M0:46:3:1:2B259:1::3:2-txt"]']),  # casilla
+    "comprado_segunda_mano": ("Comprado 2a mano", ['//*[@id="M0:46:3:1:2B259:1::4:2-txt"]']),  # casilla
+    "sociedad_gl_asociada": ("Sociedad GL asociada", ['//*[@id="M0:46:3:1:2B259:1::5:23"]']),
+    "pais_origen": ("País origen", ['//*[@id="M0:46:3:1:2B259:1::6:23"]']),
+    "denominacion_tipo": ("Denominación de tipo", ['//*[@id="M0:46:3:1:2B259:1::7:23"]']),
+    "activo_fijo_orig": ("Activo fijo orig.", ['//*[@id="M0:46:3:1:2B259:1::9:23"]']),
+    "alta_el": ("Alta el", ['//*[@id="M0:46:3:1:2B259:1::9:67"]']),
+    "anio_adquis_orig": ("Año adquis. orig.", ['//*[@id="M0:46:3:1:2B259:1::10:23"]']),
+    "valor_original": ("Valor original", ['//*[@id="M0:46:3:1:2B259:1::11:23"]']),
+    "parte_prod_propia": ("Parte prod. propia", ['//*[@id="M0:46:3:1:2B259:1::12:23"]']),
+    # Pestaña 5
+    "clave_agrupamiento": ("Clave de agrupamiento", ['//*[@id="M0:46:3:1:2B260:1::1:22"]']),
+    "indicador_propiedad": ("Indicador propiedad", ['//*[@id="M0:46:3:1:2B260:1::2:22"]']),
+    "val_patrim_man": ("Val. patrim. man.", ['//*[@id="M0:46:3:1:2B260:1::4:22"]']),
+    "delegacion_hacienda": ("Delegación Hacienda", ['//*[@id="M0:46:3:1:2B260:2::1:22"]']),
+    "nif_valor_unit": ("N.I.F. valor unit.", ['//*[@id="M0:46:3:1:2B260:2::2:22"]']),
+    "cartilla_del": ("Cartilla del", ['//*[@id="M0:46:3:1:2B260:2::3:22"]']),
+    "municipio": ("Municipio", ['//*[@id="M0:46:3:1:2B260:2::4:22"]']),
+    "reg_propiedad_del": ("Reg. propiedad del", ['//*[@id="M0:46:3:1:2B260:2::5:22"]']),
+    "inscripcion_del": ("Inscripción del", ['//*[@id="M0:46:3:1:2B260:2::5:57"]']),
+    "tomo": ("Tomo", ['//*[@id="M0:46:3:1:2B260:2::6:22"]']),
+    "hoja": ("Hoja", ['//*[@id="M0:46:3:1:2B260:2::6:28"]']),
+    "numero_actual": ("Nº actual", ['//*[@id="M0:46:3:1:2B260:2::6:34"]']),
+    "ces_propiedad": ("Ces. propiedad", ['//*[@id="M0:46:3:1:2B260:2::6:57"]']),
+    "cartilla_parcelaria": ("Cartilla parcelaria", ['//*[@id="M0:46:3:1:2B260:2::7:22"]']),
+    "cartilla_parcelaria_2": ("Cartilla parcelaria campo 2", ['//*[@id="M0:46:3:1:2B260:2::7:28"]']),
+    "superficie": ("Superficie", ['//*[@id="M0:46:3:1:2B260:2::7:57"]']),
+    "superficie_2": ("Superficie campo 2", ['//*[@id="M0:46:3:1:2B260:2::7:76"]']),
+    # Pestaña 6
+    "clase_seguro": ("Clase", ['//*[@id="M0:46:3:1:2B261:1::1:22"]']),
+    "numero_poliza": ("Nº de póliza", ['//*[@id="M0:46:3:1:2B261:1::2:22"]']),
+    "comentario": ("Comentario", ['//*[@id="M0:46:3:1:2B261:1::3:22"]']),
+    "inicio": ("Inicio", ['//*[@id="M0:46:3:1:2B261:1::5:22"]']),
+}
+
+# Pestañas del formulario del activo (la 1 es la que se abre al dar Enter).
+SAP_PESTANAS_ACTIVO = {
+    2: ("pestaña 2 (centro de coste...)", ['//*[@id="M0:46:3:1::0:1-title"]']),
+    3: ("pestaña 3 (estado...)", ['//*[@id="M0:46:3:1::0:2-title"]']),
+    4: ("pestaña 4 (acreedor...)", ['//*[@id="M0:46:3:1::0:3-title"]']),
+    5: ("pestaña 5 (clave de agrupamiento...)", ['//*[@id="M0:46:3:1::0:4-title"]']),
+    6: ("pestaña 6 (clase, póliza...)", ['//*[@id="M0:46:3:1::0:5-title"]']),
+}
+
+
+def _campo(columna, clave):
+    """Paso 'escribir el valor de la columna en el campo del catálogo'."""
+    nombre, xpath = SAP_CAMPOS_ACTIVO[clave]
+    return {"tipo": "campo", "columna": columna, "nombre": nombre, "xpath": xpath}
+
+
+def _casilla(columna, clave):
+    """Paso 'un clic en la casilla si la celda trae algo'."""
+    nombre, xpath = SAP_CAMPOS_ACTIVO[clave]
+    return {"tipo": "casilla", "columna": columna, "nombre": nombre, "xpath": xpath}
+
+
+def _pestana(numero):
+    """Paso 'cambiar a la pestaña N' (doble clic lento)."""
+    nombre, xpath = SAP_PESTANAS_ACTIVO[numero]
+    return {"tipo": "pestana", "nombre": nombre, "xpath": xpath}
+
+
+_ENTER_FORMULARIO = {"tipo": "enter", "nombre": "abrir el formulario completo"}
 
 # AS01 (crear activo fijo) para BRP - Creación. Columnas = plantilla del
 # usuario (plantillas/BRP/Plantilla Creación Activos BRP usuario.xlsm).
@@ -282,49 +409,129 @@ SAP_FORMULARIO_AS01_BRP = [
     {"tipo": "campo", "columna": "A", "nombre": "Clase de activo fijo", "xpath": ['//*[@id="M0:46:::2:29"]']},
     {"tipo": "campo", "columna": "B", "nombre": "Sociedad", "xpath": ['//*[@id="M0:46:::3:29"]']},
     {"tipo": "campo", "columna": "C", "nombre": "Ctd. de activos fijos iguales", "xpath": ['//*[@id="M0:46:::4:29"]']},
-    {"tipo": "enter", "nombre": "abrir el formulario completo"},
-    # Formulario completo (primera pestaña)
-    {"tipo": "campo", "columna": "D", "nombre": "Denominación", "xpath": ['//*[@id="M0:46:3:1:2B256:1::1:22"]']},
-    {"tipo": "campo", "columna": "AC", "nombre": "TXT.NUM.PRAL.AF", "xpath": ['//*[@id="M0:46:3:1:2B256:1::3:22"]']},
-    {"tipo": "campo", "columna": "F", "nombre": "Número de inventario", "xpath": ['//*[@id="M0:46:3:1:2B256:1::6:22"]']},
-    # Campo "Cantidad" '//*[@id="M0:46:3:1:2B256:1::7:22"]': no tiene columna en
-    #   la plantilla -> no se llena (decisión del usuario, 2026-10-05).
-    {"tipo": "campo", "columna": "G", "nombre": "Capitalizado el", "xpath": ['//*[@id="M0:46:3:1:2B256:3::1:22"]']},
+    _ENTER_FORMULARIO,
+    # Pestaña 1
+    _campo("D", "denominacion"),
+    _campo("AC", "txt_num_pral_af"),
+    _campo("F", "numero_inventario"),
+    # (campo "cantidad": no tiene columna en esta plantilla -> no se llena)
+    _campo("G", "capitalizado_el"),
     # Pestaña 2
-    {"tipo": "pestana", "nombre": "pestaña 2 (centro de coste...)", "xpath": ['//*[@id="M0:46:3:1::0:1-title"]']},
-    {"tipo": "campo", "columna": "H", "nombre": "Centro de coste", "xpath": ['//*[@id="M0:46:3:1:2B257:1::1:22"]']},
-    {"tipo": "campo", "columna": "I", "nombre": "CeCo responsable", "xpath": ['//*[@id="M0:46:3:1:2B257:1::2:22"]']},
-    {"tipo": "campo", "columna": "J", "nombre": "Orden costes", "xpath": ['//*[@id="M0:46:3:1:2B257:1::3:22"]']},
-    {"tipo": "campo", "columna": "K", "nombre": "Centro", "xpath": ['//*[@id="M0:46:3:1:2B257:1::5:22"]']},
-    {"tipo": "campo", "columna": "L", "nombre": "Emplazamiento", "xpath": ['//*[@id="M0:46:3:1:2B257:1::6:22"]']},
-    {"tipo": "campo", "columna": "M", "nombre": "Matrícula vehículo", "xpath": ['//*[@id="M0:46:3:1:2B257:1::8:22"]']},
-    {"tipo": "casilla", "columna": "N", "nombre": "Activo fijo paralizado", "xpath": ['//*[@id="M0:46:3:1:2B257:1::12:1-txt"]']},
+    _pestana(2),
+    _campo("H", "centro_coste"),
+    _campo("I", "ceco_responsable"),
+    _campo("J", "orden_costes"),
+    _campo("K", "centro"),
+    _campo("L", "emplazamiento"),
+    _campo("M", "matricula"),
+    _casilla("N", "activo_paralizado"),
     # Pestaña 3
-    {"tipo": "pestana", "nombre": "pestaña 3 (estado...)", "xpath": ['//*[@id="M0:46:3:1::0:2-title"]']},
-    {"tipo": "campo", "columna": "O", "nombre": "Estado", "xpath": ['//*[@id="M0:46:3:1:2B258:1::1:22"]']},
-    {"tipo": "campo", "columna": "P", "nombre": "Tipo", "xpath": ['//*[@id="M0:46:3:1:2B258:1::2:22"]']},
-    {"tipo": "campo", "columna": "Q", "nombre": "Procedencia", "xpath": ['//*[@id="M0:46:3:1:2B258:1::3:22"]']},
-    {"tipo": "campo", "columna": "R", "nombre": "Ubicación", "xpath": ['//*[@id="M0:46:3:1:2B258:1::4:22"]']},
-    # Campo "Total depreciados" '//*[@id="M0:46:3:1:2B258:1::5:22"]': no tiene
-    #   columna en la plantilla -> no se llena (decisión del usuario, 2026-10-05).
+    _pestana(3),
+    _campo("O", "estado"),
+    _campo("P", "tipo"),
+    _campo("Q", "procedencia"),
+    _campo("R", "ubicacion"),
+    # (campo "total_depreciados": no tiene columna en esta plantilla)
     # Pestaña 4
-    {"tipo": "pestana", "nombre": "pestaña 4 (acreedor...)", "xpath": ['//*[@id="M0:46:3:1::0:3-title"]']},
-    {"tipo": "campo", "columna": "S", "nombre": "Acreedor", "xpath": ['//*[@id="M0:46:3:1:2B259:1::1:23"]']},
-    {"tipo": "campo", "columna": "T", "nombre": "Fabricante", "xpath": ['//*[@id="M0:46:3:1:2B259:1::2:23"]']},
-    {"tipo": "campo", "columna": "U", "nombre": "Denominación de tipo", "xpath": ['//*[@id="M0:46:3:1:2B259:1::7:23"]']},
-    {"tipo": "campo", "columna": "V", "nombre": "Parte prod. propia", "xpath": ['//*[@id="M0:46:3:1:2B259:1::12:23"]']},
+    _pestana(4),
+    _campo("S", "acreedor"),
+    _campo("T", "fabricante"),
+    _campo("U", "denominacion_tipo"),
+    _campo("V", "parte_prod_propia"),
     # Pestaña 5
-    {"tipo": "pestana", "nombre": "pestaña 5 (clave de agrupamiento...)", "xpath": ['//*[@id="M0:46:3:1::0:4-title"]']},
-    {"tipo": "campo", "columna": "W", "nombre": "Clave de agrupamiento", "xpath": ['//*[@id="M0:46:3:1:2B260:1::1:22"]']},
-    {"tipo": "campo", "columna": "X", "nombre": "Indicador propiedad", "xpath": ['//*[@id="M0:46:3:1:2B260:1::2:22"]']},
-    # Columnas de la plantilla SIN campo en este formulario: E Marca, Y Número
-    # de contrato, Z Área de valoración, AA Duración, AB Periodo -> se IGNORAN
-    # (solo se llenan los campos de esta lista; decisión del usuario, 2026-10-05).
+    _pestana(5),
+    _campo("W", "clave_agrupamiento"),
+    _campo("X", "indicador_propiedad"),
+    # Columnas de la plantilla SIN campo: E Marca, Y Número de contrato,
+    # Z Área de valoración, AA Duración, AB Periodo -> se IGNORAN.
+]
+
+# AS02 (modificar activo fijo) para BRP - Modificación (2026-10-09). Columnas =
+# plantilla plantillas/BRP/Plantilla Modificacion BRP.xlsm. SAP muestra el
+# formulario con los valores ACTUALES del activo: celda vacía = ese campo no se
+# toca (conserva lo que tiene); celda con valor = se borra y se escribe.
+SAP_FORMULARIO_AS02_BRP = [
+    # Pantalla inicial de AS02
+    {"tipo": "campo", "columna": "A", "nombre": "Activo fijo", "xpath": ['//*[@id="M0:46:::2:21"]']},
+    {"tipo": "campo", "columna": "B", "nombre": "Subnúmero", "xpath": ['//*[@id="M0:46:::3:21"]']},
+    {"tipo": "campo", "columna": "C", "nombre": "Sociedad", "xpath": ['//*[@id="M0:46:::4:21"]']},
+    _ENTER_FORMULARIO,
+    # Pestaña 1
+    _campo("D", "denominacion"),
+    _campo("F", "numero_serie"),
+    _campo("G", "numero_inventario"),
+    _campo("H", "cantidad"),
+    _campo("J", "ultimo_inventario_el"),
+    _campo("K", "nota_inventario"),
+    _campo("L", "descapitalizado_el"),
+    _campo("M", "pedido_el"),
+    # Pestaña 2
+    _pestana(2),
+    _campo("N", "centro_coste"),
+    _campo("O", "ceco_responsable"),
+    _campo("P", "orden_costes"),
+    _campo("Q", "centro"),
+    _campo("R", "emplazamiento"),
+    _campo("S", "local"),
+    _campo("T", "matricula"),
+    _campo("U", "numero_personal"),
+    _campo("V", "elem_pep"),
+    _casilla("W", "activo_paralizado"),
+    # Pestaña 3
+    _pestana(3),
+    _campo("X", "estado"),
+    _campo("Y", "tipo"),
+    _campo("Z", "procedencia"),
+    _campo("AA", "ubicacion"),
+    _campo("AB", "total_depreciados"),
+    # Pestaña 4
+    _pestana(4),
+    _campo("AC", "fabricante"),
+    _casilla("AD", "af_comprado_nuevo"),
+    _casilla("AE", "comprado_segunda_mano"),
+    _campo("AF", "sociedad_gl_asociada"),
+    _campo("AG", "pais_origen"),
+    _campo("AH", "denominacion_tipo"),
+    _campo("AI", "activo_fijo_orig"),
+    _campo("AK", "alta_el"),
+    _campo("AL", "anio_adquis_orig"),
+    _campo("AM", "valor_original"),
+    _campo("AN", "parte_prod_propia"),
+    # Pestaña 5
+    _pestana(5),
+    _campo("AO", "clave_agrupamiento"),
+    _campo("AP", "indicador_propiedad"),
+    _campo("AQ", "val_patrim_man"),
+    _campo("AR", "delegacion_hacienda"),
+    _campo("AS", "nif_valor_unit"),
+    _campo("AT", "cartilla_del"),
+    _campo("AU", "municipio"),
+    _campo("AV", "reg_propiedad_del"),
+    _campo("AW", "inscripcion_del"),
+    _campo("AX", "tomo"),
+    _campo("AY", "hoja"),
+    _campo("AZ", "numero_actual"),
+    _campo("BA", "ces_propiedad"),
+    _campo("BB", "cartilla_parcelaria"),
+    _campo("BC", "cartilla_parcelaria_2"),
+    _campo("BD", "superficie"),
+    _campo("BE", "superficie_2"),
+    # Pestaña 6
+    _pestana(6),
+    _campo("BF", "clase_seguro"),
+    _campo("BG", "numero_poliza"),
+    _campo("BH", "comentario"),
+    _campo("BI", "inicio"),
+    # Columnas de la plantilla SIN campo (por confirmar, PENDIENTES.md): E Marca,
+    # I Cantidad 2, AJ Subnúmero activo fijo origen, BJ Parte contratante,
+    # BK Número de contrato, BL Fecha del contrato, BM Área de valoración,
+    # BN Duración, BO Periodo -> se IGNORAN.
 ]
 
 # Qué formulario usa cada (tipo, acción). Si no hay, el Flujo 3 no entra a SAP.
 SAP_FORMULARIOS_POR_CASO = {
     (TIPO_BRP, ACCION_CREACION): SAP_FORMULARIO_AS01_BRP,
+    (TIPO_BRP, ACCION_MODIFICACION): SAP_FORMULARIO_AS02_BRP,
 }
 
 # SAP es lento al cambiar de pestaña/ventana: segundos entre el 1er y el 2º
@@ -351,6 +558,13 @@ SAP_XPATH_MENSAJE_ESTADO = []
 # Éxito en AS01: "El act.fj. 7129560 0 se ha creado" -> código 7129560 (el
 # primer número; el segundo es el subnúmero).
 SAP_REGEX_ACTIVO_CREADO = r"act\.?\s*fj\.?\s*(\d+)\s+\d+\s+se ha creado"
+# Mensaje de ÉXITO de cada transacción tras Guardar (el grupo 1 es lo que va a
+# la columna de resultado). Si una transacción NO está aquí, el bot NUNCA
+# guarda en ella (no podría saber si salió bien).
+#   AS02: PENDIENTE el texto del mensaje de éxito de la modificación.
+SAP_REGEX_EXITO_POR_TRANSACCION = {
+    SAP_TX_CREAR: SAP_REGEX_ACTIVO_CREADO,
+}
 
 # Salir SIN guardar (supervisión): DOS clics en "Atrás" (separados por
 # SAP_ESPERA_ENTRE_CLICS_SEG) y confirmar "salir sin guardar" en la ventana
@@ -368,16 +582,6 @@ SAP_XPATH_CONFIRMAR_SALIR_SIN_GUARDAR = ['//*[@id="M1:46:::3:18"]']
 # En CUALQUIER modo pruebas (REEMPLAZO o SOLO_SAP) guardar está PROHIBIDO
 # aunque esto sea True (ver flujo3_sap.guardar_permitido()).
 SAP_GUARDAR_REAL = False
-
-# --- AS02 (REFERENCIA para la acción MODIFICAR) -------------------------------
-# Capturados el 2026-09-29, cuando la creación BRP pasaba por AS02 después de
-# la masiva (ese paso ya NO existe). Se conservan como referencia para la
-# acción MODIFICAR, que tendrá su propia plantilla y se configura después.
-SAP_AS02_XPATH_ACTIVO_FIJO = ['//*[@id="M0:46:::2:21-r"]']   # código del activo
-SAP_AS02_XPATH_SOCIEDAD = ['//*[@id="M0:46:::4:21"]']        # sociedad
-# (luego Enter) Pantalla del activo: campo "TXT.NUM.PRAL.AF". Puede traer
-# texto: se BORRA antes de escribir.
-SAP_AS02_XPATH_TXT_ACREEDOR = ['//*[@id="M0:46:3:1:2B256:1::3:22"]']
 
 
 # ---------------------------------------------------------------------------

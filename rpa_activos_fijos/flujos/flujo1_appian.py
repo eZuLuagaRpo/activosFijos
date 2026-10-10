@@ -36,6 +36,7 @@ from selenium.webdriver.common.by import By
 from appian.bandeja_reader import BandejaReader
 from config import (
     ALIAS_ACCION,
+    CASOS_DOS_ARCHIVOS,
     DETALLE_VALORES_VACIOS,
     DETALLE_XPATH_BOTON_ADJUNTO_RESPALDO,
     DETALLE_XPATH_SECCION_ACTIVOS,
@@ -54,6 +55,7 @@ from core.exceptions import (
 )
 from core.models import Solicitud
 from core.retry import ejecutar_con_reintentos
+from validacion import router
 from core.texto import mapear_alias, normalizar
 
 
@@ -160,24 +162,19 @@ def _abrir_caso_directo(client, case_id, url, logger=None):
         logger.info("Caso %s: navegación directa OK.", case_id)
 
 
-def _tomar_excel(files, case_id):
+def _excels_adjuntos(files, case_id):
     """
-    De la lista de adjuntos descargados por la librería, toma la ruta del
-    Excel.
+    De la lista de adjuntos descargados por la librería, devuelve las rutas
+    de los Excel (uno o más).
 
     Raises:
         SinAdjuntosError: si no hay adjuntos o ninguno es un Excel.
-        MultiplesAdjuntosError: si hay MÁS DE UN Excel adjunto. Pasó en un
-            caso real (2026-08-18): el usuario adjuntó dos. Pendiente de
-            confirmar con la dueña de la automatización si es error del
-            usuario o un caso legítimo — mientras tanto, no se adivina cuál
-            usar, se deja el caso para revisión manual.
     """
     if not files:
         raise SinAdjuntosError(f"El caso {case_id} no trae adjuntos.")
 
     excels = [
-        adjunto
+        adjunto.get("full_path")
         for adjunto in files
         if (adjunto.get("file") or "").lower().endswith((".xlsx", ".xls", ".xlsm"))
     ]
@@ -186,15 +183,55 @@ def _tomar_excel(files, case_id):
         raise SinAdjuntosError(
             f"El caso {case_id} trae adjuntos pero ninguno parece un Excel."
         )
+    return excels
 
-    if len(excels) > 1:
-        nombres = ", ".join(e.get("file") for e in excels)
+
+def _asignar_excels(rutas, case_id, tipo, accion, logger=None):
+    """
+    Decide qué Excel usar. Devuelve (excel_principal, excel_previo):
+      - 1 Excel  -> (ese, None): solicitud normal (sin revisar su contenido
+        aquí; la validación del Flujo 2 se encarga).
+      - 2 Excel y (tipo, accion) está en CASOS_DOS_ARCHIVOS (BRP: "Crear" con
+        modificación + creación) -> se identifica cuál es cuál por sus
+        ENCABEZADOS: (creación, modificación).
+      - Cualquier otra cosa -> MultiplesAdjuntosError (revisión manual). Pasó
+        en un caso real (2026-08-18) que el usuario adjuntó dos por error.
+    """
+    if len(rutas) == 1:
+        return rutas[0], None
+
+    nombres = ", ".join(os.path.basename(r) for r in rutas)
+    segundo = CASOS_DOS_ARCHIVOS.get((tipo, accion))
+    if len(rutas) != 2 or segundo is None:
         raise MultiplesAdjuntosError(
-            f"El caso {case_id} trae {len(excels)} Excel adjuntos ({nombres}). "
+            f"El caso {case_id} trae {len(rutas)} Excel adjuntos ({nombres}). "
             "No se sabe cuál usar; se deja para revisión manual."
         )
 
-    return excels[0].get("full_path")
+    clasificacion = {
+        ruta: router.identificar_plantilla(ruta, [(tipo, accion), segundo])
+        for ruta in rutas
+    }
+    principal = [r for r, c in clasificacion.items() if c == (tipo, accion)]
+    previo = [r for r, c in clasificacion.items() if c == segundo]
+    if len(principal) != 1 or len(previo) != 1:
+        detalle = "; ".join(
+            f"{os.path.basename(r)} = {'/'.join(c) if c else 'no reconocido'}"
+            for r, c in clasificacion.items()
+        )
+        raise MultiplesAdjuntosError(
+            f"El caso {case_id} trae 2 Excel ({nombres}), pero no se pudo "
+            f"identificar uno de {'/'.join(segundo)} y uno de {tipo}/{accion} por "
+            f"sus encabezados ({detalle}). Se deja para revisión manual."
+        )
+
+    if logger:
+        logger.info(
+            "Caso %s: CASO ESPECIAL (2 Excel). PASO 1 %s: %s | PASO 2 %s: %s",
+            case_id, "/".join(segundo), os.path.basename(previo[0]),
+            f"{tipo}/{accion}", os.path.basename(principal[0]),
+        )
+    return principal[0], previo[0]
 
 
 def _descargar_adjunto_manual(client, case_id, logger=None):
@@ -318,6 +355,16 @@ def _buscar_archivo_prueba(case_id):
     return os.path.join(DOWNLOAD_TEST_DIR, candidatos[0]) if candidatos else None
 
 
+def _buscar_archivo_prueba_modificacion(case_id):
+    """
+    MODO PRUEBAS (reemplazo), CASO ESPECIAL "dos archivos": el segundo Excel
+    de la solicitud se deja como  <número>_modificacion.xlsx  (ej.
+    PDA-7889_modificacion.xlsx). Cuál es cuál se decide igual por contenido.
+    Devuelve la ruta o None.
+    """
+    return _buscar_archivo_prueba(f"{case_id}_modificacion")
+
+
 def _usar_archivo_prueba(case_id, tipo, accion, archivo_prueba, excel_appian, logger=None):
     """
     MODO PRUEBAS (reemplazo): en vez del Excel adjunto en Appian, se usa una
@@ -360,6 +407,7 @@ def obtener_solicitud(client, caso, logger=None):
     # 0) MODO PRUEBAS (reemplazo): solo se trabajan las solicitudes que
     #    tienen archivo en downloads_test. Las demás ni se abren.
     archivo_prueba = None
+    archivo_prueba_mod = None
     if MODO_PRUEBAS_REEMPLAZO:
         archivo_prueba = _buscar_archivo_prueba(case_id)
         if archivo_prueba is None:
@@ -367,6 +415,7 @@ def obtener_solicitud(client, caso, logger=None):
                 f"MODO PRUEBAS: no hay archivo {case_id}.xlsx/.xlsm en "
                 "downloads_test; la solicitud se omite."
             )
+        archivo_prueba_mod = _buscar_archivo_prueba_modificacion(case_id)
 
     # 1) Abrir el caso navegando directo a su URL (con reintentos).
     ejecutar_con_reintentos(
@@ -396,31 +445,51 @@ def obtener_solicitud(client, caso, logger=None):
         descripcion=f"leer tipo/acción del caso {case_id}",
     )
 
-    # 4) Excel adjunto: primero lo que ya descargó la librería; si no hay
+    # 4) Excel adjunto(s): primero lo que ya descargó la librería; si no hay
     #    nada usable, se intenta el clic manual de respaldo.
     try:
-        excel_path = _tomar_excel(files, case_id)
+        excels_appian = _excels_adjuntos(files, case_id)
     except SinAdjuntosError:
-        excel_path = _descargar_adjunto_manual(client, case_id, logger=logger)
+        excels_appian = [_descargar_adjunto_manual(client, case_id, logger=logger)]
 
-    # 5) Renombrar el Excel descargado a CASE_ID_tipo_accion.ext, ya con
-    #    tipo/acción conocidos (paso 3). No falla el caso si algo sale mal.
-    excel_path = _normalizar_nombre_excel(
-        case_id, tipo, accion, excel_path, logger=logger
-    )
-
-    # 6) MODO PRUEBAS (reemplazo): el Excel que sigue el flujo es la copia
-    #    del archivo de prueba, no el adjunto de Appian.
+    excel_modificacion = None
     if archivo_prueba:
+        # 5a) MODO PRUEBAS (reemplazo): los adjuntos reales se conservan (si
+        #     es uno, se renombra como siempre) pero el flujo sigue con COPIAS
+        #     de los archivos de prueba.
+        excel_appian = excels_appian[0]
+        if len(excels_appian) == 1:
+            excel_appian = _normalizar_nombre_excel(
+                case_id, tipo, accion, excel_appian, logger=logger
+            )
+        fuentes = [archivo_prueba] + ([archivo_prueba_mod] if archivo_prueba_mod else [])
+        principal, previo = _asignar_excels(fuentes, case_id, tipo, accion, logger=logger)
         excel_path = _usar_archivo_prueba(
-            case_id, tipo, accion, archivo_prueba, excel_path, logger=logger
+            case_id, tipo, accion, principal, excel_appian, logger=logger
         )
+        if previo:
+            tipo_previo, accion_previa = CASOS_DOS_ARCHIVOS[(tipo, accion)]
+            excel_modificacion = _usar_archivo_prueba(
+                case_id, tipo_previo, accion_previa, previo, excel_appian, logger=logger
+            )
+    else:
+        # 5b) Normal: 1 Excel, o 2 en el caso especial (identificados por
+        #     contenido). Se renombran a CASE_ID_tipo_accion.ext (no falla el
+        #     caso si el renombre sale mal).
+        principal, previo = _asignar_excels(excels_appian, case_id, tipo, accion, logger=logger)
+        excel_path = _normalizar_nombre_excel(case_id, tipo, accion, principal, logger=logger)
+        if previo:
+            tipo_previo, accion_previa = CASOS_DOS_ARCHIVOS[(tipo, accion)]
+            excel_modificacion = _normalizar_nombre_excel(
+                case_id, tipo_previo, accion_previa, previo, logger=logger
+            )
 
     solicitud = Solicitud(
         case_id=case_id,
         tipo=tipo,
         accion=accion,
         excel_path=excel_path,
+        excel_modificacion=excel_modificacion,
         info_df=info_df,
         fecha_vencimiento=fecha_vencimiento,
         tipo_crudo=tipo_crudo,
@@ -429,12 +498,13 @@ def obtener_solicitud(client, caso, logger=None):
 
     if logger:
         logger.info(
-            "Caso %s -> vencimiento=%s | activo=%s | accion=%s | excel=%s",
+            "Caso %s -> vencimiento=%s | activo=%s | accion=%s | excel=%s%s",
             case_id,
             fecha_vencimiento or "?",
             tipo_crudo or "?",
             accion_cruda or "?",
             excel_path,
+            f" | excel PASO 1 (modificación)={excel_modificacion}" if excel_modificacion else "",
         )
     return solicitud
 

@@ -234,12 +234,87 @@ ve cuando no hay más páginas.
 
 ## P11 — Otras acciones de BRP: Modificar (AS02) y Borrar (AS06) 🔲
 
-- Cada una tendrá **su propia plantilla** (distinta a la de creación) y su
-  Word de proceso → nuevo validador en `validacion/plantillas/` + su
-  formulario por configuración (mismo mecanismo de P3).
-- AS02: en `config.py` quedan como **referencia** los selectores capturados
-  el 2026-09-29 (`SAP_AS02_XPATH_ACTIVO_FIJO`, `SAP_AS02_XPATH_SOCIEDAD`,
-  `SAP_AS02_XPATH_TXT_ACREEDOR`). Revisarlos con la plantilla de modificar.
+- **Modificar (AS02): configurado el 2026-10-09** → ver P13 (plantilla,
+  formulario, dudas). Los selectores viejos `SAP_AS02_XPATH_*` se retiraron.
+- **Borrar (AS06):** pendiente. Tendrá su propia plantilla y su formulario
+  por configuración (mismo mecanismo de P3, reutilizando el catálogo
+  `SAP_CAMPOS_ACTIVO` si aplica).
+
+---
+
+## P13 — BRP: modificación (AS02) y el caso especial "modificar + crear" 🔲
+
+**Hecho (2026-10-09):** formulario de **AS02** configurado
+(`SAP_FORMULARIO_AS02_BRP`; pantalla inicial A activo / B subnúmero / C
+sociedad → Enter → mismo formulario de AS01 + campos extra + pestaña 6) y
+validador de `plantillas/BRP/Plantilla Modificacion BRP.xlsm`
+(`ValidadorBrpModificacion`: A y C obligatorios, B opcional). Se puede probar
+con el modo solo SAP (`prueba1_brp_modificacion.xlsm`). Los XPath del
+formulario quedaron en un **catálogo único** (`SAP_CAMPOS_ACTIVO`) compartido
+por AS01 y AS02.
+
+**Caso especial — IMPLEMENTADO (2026-10-10):** Appian dice "Activos BRP →
+Crear" pero llegan **2 Excel**. PASO 1: modificación en AS02 para
+actualizar el **número de inventario** (el usuario ya trae en la columna G
+el valor final con el sufijo T1/T2/T3; el bot borra y escribe; los demás
+campos con valor también se llenan). PASO 2: creación en AS01, igual que la
+creación normal (sin sufijos). Cuál Excel es cuál se decide por los
+**encabezados** (`router.identificar_plantilla`). Se validan **los dos**
+antes de SAP. Recarga de página entre todos los activos. Respuesta en Appian:
+igual que la creación (Excel con "Código SAP"). Config:
+`CASOS_DOS_ARCHIVOS`, `CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION`.
+Pruebas: `tests/test_caso_especial_brp.py`.
+
+**Modificación sola ("BRP → Modificar", 1 Excel): ✅ funciona (2026-10-11).**
+Pendiente igual que la creación: qué se devuelve al usuario y mensaje de
+éxito de AS02 para poder guardar. Ojo: hoy, al guardar, el resultado iría a
+una columna "Código SAP" del Excel de modificación (definir el nombre al
+conocer la respuesta).
+
+**Pendiente del caso especial:**
+- **Si falla la modificación de un activo, ¿se crea igual?** Hoy (lo más
+  seguro): NO se crea NINGÚN activo del Excel de creación (se salta TODO el
+  PASO 2) y la solicitud queda fallida
+  (`CASO_ESPECIAL_CREAR_SI_FALLA_MODIFICACION = False`). Las filas de
+  modificación sí se intentan todas. Motivo: el bot no sabe qué fila de
+  creación corresponde a qué fila de modificación (plantillas distintas, sin
+  columna que las relacione). Opciones planteadas al usuario (2026-10-11):
+  (1) todo o nada [actual]; (2) crear siempre (`= True`); (3) saltar solo la
+  creación relacionada — requiere que negocio defina el dato que las une
+  (ej. ¿el inventario de creación = inventario de modificación sin el sufijo
+  T1?). PENDIENTE la decisión.
+- **Qué se le devuelve al usuario de la modificación** (la plantilla tal
+  cual, o con una columna de resultado por fila). Lo trae el usuario.
+- El texto del mensaje de la solicitud no se lee (no hace falta: con los 2
+  adjuntos se detecta el caso y el sufijo ya viene en el Excel).
+
+**Dudas abiertas:**
+1. **Casillas en modificación** (W activo paralizado, AD AF comprado nuevo,
+   AE comprado 2a mano): en AS02 la casilla puede venir YA marcada; un clic
+   la DESMARCARÍA. Hoy: si la celda trae algo → un clic (como en creación).
+   ¿Qué significa el valor de la celda (marcar / desmarcar)? Para hacerlo
+   seguro hace falta leer el estado de la casilla (XPath de la casilla, no de
+   su texto, y el atributo que cambia).
+2. **Columnas sin campo** (se ignoran hoy): E Marca, I Cantidad 2,
+   **AJ Subnúmero activo fijo origen** (¿va al lado de "Activo fijo orig."?),
+   BJ Parte contratante, BK Número de contrato, BL Fecha del contrato,
+   BM Área de valoración, BN Duración, BO Periodo.
+3. **"0" = vacío:** la regla general trata `0` como celda vacía, así que un
+   subnúmero `0` (B) o un valor `0` en un campo NO se escribe. ¿En
+   modificación hay que poder escribir 0 (o borrar un campo)?
+4. **Reglas de la plantilla:** comentarios del Excel: Q1 "Si hay
+   emplazamiento tiene que tener centro"; X1 "Obligatorio cuando es
+   activación de placas … siempre WK". Hoy no se validan (solo A y C).
+   ¿Se agregan? Encabezados con largo (AA 4, AC 30, AH 15 caracteres): ¿se
+   validan?
+5. **Mensaje de éxito de AS02** (texto) para poder guardar
+   (`SAP_REGEX_EXITO_POR_TRANSACCION`). Sin él, AS02 nunca guarda.
+6. **"BRP → Modificar" en Appian:** hoy, una solicitud real "Activos BRP →
+   Modificar" usaría esta plantilla y AS02. ¿Es correcto, o la modificación
+   solo existe dentro del caso especial?
+7. La plantilla oficial trae **1712 filas de datos** (y una "Hoja3"). ¿Es un
+   archivo real de ejemplo? Para el bot no importa (valida la primera hoja),
+   pero 1712 activos uno por uno en AS02 toman muchas horas.
 
 ---
 

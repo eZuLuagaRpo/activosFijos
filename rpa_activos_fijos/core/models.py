@@ -35,6 +35,9 @@ class Solicitud:
     tipo: Optional[str] = None        # tipo de activo canónico (ver config.py)
     accion: Optional[str] = None      # acción canónica (creacion/modificacion/...)
     excel_path: Optional[str] = None  # ruta completa del Excel descargado de Appian
+    # CASO ESPECIAL "dos archivos" (config.CASOS_DOS_ARCHIVOS): ruta del Excel
+    # que se procesa PRIMERO (BRP: el de modificación, AS02). None = normal.
+    excel_modificacion: Optional[str] = None
     info_df: Any = None               # DataFrame label|value con todo el detalle
     fecha_vencimiento: Optional[str] = None  # heredada de la bandeja (prioridad)
 
@@ -46,6 +49,8 @@ class Solicitud:
     # texto es el código del activo creado o el mensaje de error; va a la
     # columna "Código SAP" que se le devuelve al usuario.
     resultados_sap: Dict[int, str] = field(default_factory=dict)
+    # Lo mismo para el Excel de modificación del caso especial.
+    resultados_sap_modificacion: Dict[int, str] = field(default_factory=dict)
 
 
 @dataclass

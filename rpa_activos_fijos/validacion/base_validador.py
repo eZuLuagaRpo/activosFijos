@@ -153,6 +153,31 @@ class BaseValidador:
             raise ValidacionError("; ".join(resultado.errores_plantilla))
         return list(self._filas_de_datos(filas, posiciones))
 
+    def reconoce_encabezados(self, ruta_excel):
+        """
+        True si el archivo es de ESTA plantilla: formato aceptado y TODOS los
+        encabezados de la fila 1 presentes. Solo lee la fila 1 y nunca lanza
+        (si no se puede abrir, devuelve False). Sirve para saber cuál es cuál
+        cuando una solicitud trae 2 Excel (caso especial BRP).
+        """
+        if os.path.splitext(ruta_excel or "")[1].lower() not in self.extensiones:
+            return False
+        try:
+            libro = load_workbook(ruta_excel, read_only=True, data_only=True)
+        except Exception:
+            return False
+        try:
+            hoja = libro.worksheets[0]
+            hoja.reset_dimensions()
+            encabezados = next(hoja.iter_rows(max_row=1, values_only=True), ())
+        except Exception:
+            return False
+        finally:
+            libro.close()
+        resultado = ResultadoValidacion(archivo=ruta_excel, plantilla=self.nombre)
+        self._ubicar_columnas(encabezados, resultado)
+        return not resultado.errores_plantilla
+
     @staticmethod
     def _filas_de_datos(filas, posiciones):
         """

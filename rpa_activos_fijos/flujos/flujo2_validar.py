@@ -13,6 +13,7 @@ Responsabilidad:
      lanza PlantillaInvalidaError y el caso no sigue a SAP.
 """
 
+from config import CASOS_DOS_ARCHIVOS
 from core.exceptions import PlantillaInvalidaError, ValidacionError
 from validacion import router
 
@@ -34,13 +35,35 @@ def validar_solicitud(solicitud, logger=None):
             f"la acción (tipo={solicitud.tipo!r}, accion={solicitud.accion!r})."
         )
 
-    validador = router.resolver(solicitud.tipo, solicitud.accion, logger=logger)
-    resultado = validador.validar(solicitud.excel_path)
-    _registrar_detalle(solicitud.case_id, resultado, logger)
+    # CASO ESPECIAL "dos archivos": se valida PRIMERO el Excel del PASO 1
+    # (BRP: modificación). Si cualquiera de los dos es inválido, no se toca SAP.
+    if solicitud.excel_modificacion:
+        tipo_previo, accion_previa = CASOS_DOS_ARCHIVOS[(solicitud.tipo, solicitud.accion)]
+        _validar_archivo(
+            solicitud.case_id, tipo_previo, accion_previa,
+            solicitud.excel_modificacion, "PASO 1 (modificación)", logger,
+        )
+        etiqueta = "PASO 2 (creación)"
+    else:
+        etiqueta = None
+
+    return _validar_archivo(
+        solicitud.case_id, solicitud.tipo, solicitud.accion,
+        solicitud.excel_path, etiqueta, logger,
+    )
+
+
+def _validar_archivo(case_id, tipo, accion, ruta, etiqueta, logger):
+    """Valida UN Excel con el validador de (tipo, accion). `etiqueta` solo se
+    usa en el caso especial, para decir en el mensaje cuál de los 2 falló."""
+    validador = router.resolver(tipo, accion, logger=logger)
+    resultado = validador.validar(ruta)
+    _registrar_detalle(case_id, resultado, logger)
 
     if not resultado.valida:
+        prefijo = f"{etiqueta}: " if etiqueta else ""
         raise PlantillaInvalidaError(
-            f"Caso {solicitud.case_id}: {resultado.resumen()}", resultado
+            f"Caso {case_id}: {prefijo}{resultado.resumen()}", resultado
         )
     return resultado
 
